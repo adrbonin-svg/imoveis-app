@@ -1925,9 +1925,10 @@ function renderContratos() {
     _th('ct','codigo','Código') + _th('ct','imovel','Imóvel') +
     _th('ct','inquilino','Inquilino') + _th('ct','dataInicio','Início') +
     _th('ct','dataTermino','Término') + _th('ct','valorMensal','Valor Mensal') +
+    _thStatic('Caução / Garantia') +
     _th('ct','status','Status') + _thStatic('Arquivo') + _thStatic('Ações') + '</tr>';
   document.getElementById('ct-tbody').innerHTML = list.length === 0
-    ? `<tr><td colspan="9"><div class="empty"><div class="empty-icon">📄</div><p>Nenhum contrato encontrado</p></div></td></tr>`
+    ? `<tr><td colspan="10"><div class="empty"><div class="empty-icon">📄</div><p>Nenhum contrato encontrado</p></div></td></tr>`
     : list.map(c => {
         const dias = c.dataTermino ? Math.ceil((new Date(c.dataTermino + 'T12:00:00') - new Date()) / 86400000) : null;
         const alerta = dias !== null && dias <= 30 && dias >= 0;
@@ -1935,6 +1936,14 @@ function renderContratos() {
           ? `<button class="btn btn-ghost btn-sm" title="Visualizar arquivo" onclick="viewContratoArquivo(${c.id})">📎 Ver</button>
              <button class="btn btn-danger btn-sm" title="Remover arquivo" onclick="removeContratoArquivo(${c.id})">🗑</button>`
           : `<button class="btn btn-ghost btn-sm upload-inline-btn" onclick="triggerInlineUpload(${c.id})">📎 Anexar</button>`;
+        const caucaoVal = c.caucao > 0 ? fmt(c.caucao) : null;
+        const caucaoParc = c.caucaoParcelas > 1 ? `${c.caucaoParcelas}x de ${fmt(c.caucao / c.caucaoParcelas)}` : null;
+        const caucaoForma = c.caucaoFormaPagamento || null;
+        const caucaoCell = caucaoVal
+          ? `<strong>${caucaoVal}</strong>
+             ${caucaoParc ? `<div style="font-size:11px;color:var(--gray-400)">${caucaoParc}</div>` : ''}
+             ${caucaoForma ? `<div style="font-size:11px;color:var(--gray-500)">💳 ${caucaoForma}</div>` : ''}`
+          : `<span style="color:var(--gray-300);font-size:12px">—</span>`;
         return `
         <tr>
           <td>
@@ -1951,6 +1960,7 @@ function renderContratos() {
           <td>${fmtDate(c.dataInicio)}</td>
           <td>${alerta ? `<span class="badge badge-yellow">${fmtDate(c.dataTermino)} ⚠️</span>` : fmtDate(c.dataTermino)}</td>
           <td><strong>${fmt(c.valorMensal)}</strong></td>
+          <td>${caucaoCell}</td>
           <td><span class="badge ${c.status === 'ATIVO' ? 'badge-green' : c.status === 'ENCERRADO' ? 'badge-red' : 'badge-gray'}">${c.status}</span></td>
           <td><div class="actions">${arquivoBtns}</div></td>
           <td>
@@ -2058,8 +2068,9 @@ function openContrato(id = null) {
     form.status.value = c.status;
     form.elements['dataContrato'].value  = c.dataContrato  || '';
     form.elements['diaVencimento'].value = c.diaVencimento || '';
-    form.elements['caucao'].value                  = c.caucao          || '';
-    form.elements['caucaoParcelas'].value          = c.caucaoParcelas  || 1;
+    form.elements['caucao'].value                  = c.caucao                || '';
+    form.elements['caucaoParcelas'].value          = c.caucaoParcelas        || 1;
+    form.elements['caucaoFormaPagamento'].value    = c.caucaoFormaPagamento  || '';
     form.elements['taxaAgua'].value                = c.taxaAgua        || '';
     form.elements['taxaManutencao'].value          = c.taxaManutencao  || '';
     form.elements['taxasExtras'].value             = c.taxasExtras     || '';
@@ -2172,8 +2183,9 @@ function saveContrato() {
     status: form.status.value,
     dataContrato:  form.elements['dataContrato'].value,
     diaVencimento: parseInt(form.elements['diaVencimento'].value) || null,
-    caucao:         parseFloat(form.elements['caucao'].value)         || 0,
-    caucaoParcelas:  parseInt(form.elements['caucaoParcelas'].value)   || 1,
+    caucao:                parseFloat(form.elements['caucao'].value)              || 0,
+    caucaoParcelas:         parseInt(form.elements['caucaoParcelas'].value)       || 1,
+    caucaoFormaPagamento:  form.elements['caucaoFormaPagamento']?.value           || '',
     taxaAgua:        parseFloat(form.elements['taxaAgua'].value)       || 0,
     taxaManutencao:  parseFloat(form.elements['taxaManutencao'].value) || 0,
     taxasExtras:     parseFloat(form.elements['taxasExtras'].value)    || 0,
