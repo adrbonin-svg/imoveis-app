@@ -552,7 +552,10 @@
       <div class="table-wrapper">
         <div class="table-header">
           <h3>Controle de Acesso</h3>
-          <button class="btn btn-primary" onclick="openUsuario()">+ Novo Usuário</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="openCriarAcessoInquilino()" title="Criar perfil de acesso para inquilino que não possui login">🏠 Criar Acesso Inquilino</button>
+            <button class="btn btn-primary" onclick="openUsuario()">+ Novo Usuário</button>
+          </div>
         </div>
         <table>
           <thead>
@@ -1700,6 +1703,30 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-usuario')">Cancelar</button>
       <button class="btn btn-primary" onclick="saveUsuario()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL CRIAR ACESSO INQUILINO ══ -->
+<div class="modal-overlay" id="modal-criar-acesso-inq">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>🏠 Criar Acesso Inquilino</h3>
+      <button class="modal-close" onclick="closeModal('modal-criar-acesso-inq')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--gray-500);font-size:13px;margin-bottom:16px">Selecione um inquilino para criar o acesso ao portal. O login e a senha serão gerados automaticamente usando o CPF.</p>
+      <div class="form-group">
+        <label>Inquilino *</label>
+        <select id="criar-acesso-inq-select" style="width:100%">
+          <option value="">— Selecione —</option>
+        </select>
+        <span id="criar-acesso-inq-info" style="font-size:12px;color:var(--gray-400);margin-top:4px;display:block"></span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-criar-acesso-inq')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarAcessoInquilino()">Criar Acesso</button>
     </div>
   </div>
 </div>
