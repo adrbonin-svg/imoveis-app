@@ -210,7 +210,12 @@ if (DB.config && (
 
 // ── UTILS ──────────────────────────────────────────────
 const fmt = v => v != null && v !== '' ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v) : '—';
-const fmtDate = d => d ? new Date(d + 'T12:00:00').toLocaleDateString('pt-BR') : '—';
+const fmtDate = d => d ? new Date(d + (d.length === 10 ? 'T12:00:00' : '')).toLocaleDateString('pt-BR') : '—';
+const fmtDateHora = d => {
+  if (!d) return '—';
+  const dt = new Date(d);
+  return dt.toLocaleDateString('pt-BR') + ' às ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+};
 const today = () => new Date().toISOString().split('T')[0];
 
 // ── ÍNDICES DE INFLAÇÃO (API Banco Central do Brasil) ───
@@ -5430,6 +5435,17 @@ function _renderInqChecklist(inquilinoId) {
         <td style="color:var(--gray-600);font-size:12px">${_esc(item.obs || '')}</td>
       </tr>`).join('');
 
+    const assBadge = ck.confirmadoEm
+      ? `<div class="ck-ass-bloco">
+           <div class="ck-ass-titulo">✅ Assinado eletronicamente</div>
+           <div class="ck-ass-linha"><strong>Por:</strong> ${_esc(ck.confirmadoPor || '—')}</div>
+           <div class="ck-ass-linha"><strong>Em:</strong> ${fmtDateHora(ck.confirmadoEm)}</div>
+           <div class="ck-ass-linha"><strong>IP:</strong> ${_esc(ck.assinaturaIp || '—')}</div>
+           <div class="ck-ass-linha"><strong>Dispositivo:</strong> <span style="font-size:10px;word-break:break-all">${_esc((ck.assinaturaAgente || '—').substring(0, 80))}${(ck.assinaturaAgente || '').length > 80 ? '…' : ''}</span></div>
+           ${ck.assinaturaHash ? `<div class="ck-ass-linha"><strong>Hash SHA-256:</strong> <code style="font-size:10px;word-break:break-all">${ck.assinaturaHash}</code></div>` : ''}
+         </div>`
+      : `<div style="font-size:12px;color:var(--gray-400);padding:6px 0">⏳ Aguardando assinatura do inquilino</div>`;
+
     return `
     <div class="ck-inq-card">
       <div class="ck-inq-card-head">
@@ -5440,6 +5456,7 @@ function _renderInqChecklist(inquilinoId) {
           </div>
         </div>
       </div>
+      ${assBadge}
       <table class="ck-inq-table">
         <thead><tr><th>Item</th><th style="width:80px;text-align:center">Foto</th><th>Observações</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -5504,7 +5521,10 @@ function _portalRenderChecklists(inq) {
       </tr>`).join('');
 
     const confirmBadge = conf
-      ? `<span class="portal-badge-ok">✅ Confirmado em ${fmtDate(conf)}</span>`
+      ? `<div style="text-align:right">
+           <span class="portal-badge-ok">✅ Assinado em ${fmtDateHora(conf)}</span>
+           ${ck.assinaturaHash ? `<div style="font-size:10px;color:var(--gray-400);margin-top:3px;font-family:monospace" title="Hash SHA-256 do documento">🔒 ${ck.assinaturaHash.slice(0,16)}…</div>` : ''}
+         </div>`
       : `<button class="portal-btn-confirm" onclick="portalConfirmarChecklist('${ck.id}', ${inq.id})">✅ Confirmar e Assinar Vistoria</button>`;
 
     return `
@@ -5524,17 +5544,42 @@ function _portalRenderChecklists(inq) {
   }).join('');
 }
 
-function portalConfirmarChecklist(ckId, inqId) {
-  if (!confirm_('Ao confirmar, você declara ter vistoriado e concordado com o estado registrado. Confirmar?')) return;
+async function _sha256(texto) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function portalConfirmarChecklist(ckId, inqId) {
+  if (!confirm_('Ao confirmar, você declara ter vistoriado e concordado com o estado registrado neste checklist. Esta ação tem validade como assinatura eletrônica. Confirmar?')) return;
   const inq = DB.inquilinos.find(x => x.id === inqId);
   if (!inq) return;
   const ck  = inq.checklistFotos.find(c => String(c.id) === String(ckId));
   if (!ck)  return;
-  ck.confirmadoEm = new Date().toISOString().slice(0,10);
+
+  // Conteúdo canônico do documento para hash
+  const conteudo = JSON.stringify({
+    inquilino: inq.nome,
+    cpf:       inq.cpf,
+    imovel:    ck.imovelNome,
+    tipo:      ck.tipo,
+    vinculadoEm: ck.vinculadoEm,
+    items:     (ck.items || []).map(({ item, obs, foto }) => ({ item, obs, foto })),
+  });
+
+  const [hash, servidor] = await Promise.all([
+    _sha256(conteudo),
+    fetch('/api/registrar-assinatura', { method: 'POST' }).then(r => r.json()).catch(() => ({})),
+  ]);
+
+  ck.confirmadoEm  = servidor.registradoEm || new Date().toISOString();
   ck.confirmadoPor = inq.nome;
+  ck.assinaturaHash   = hash;
+  ck.assinaturaIp     = servidor.ip     || 'não capturado';
+  ck.assinaturaAgente = servidor.agente || navigator.userAgent;
+
   saveData();
   _portalRenderChecklists(inq);
-  toast('Vistoria confirmada!', 'success');
+  toast('Vistoria assinada eletronicamente!', 'success');
 }
 
 function _portalRenderContratos(inq) {
