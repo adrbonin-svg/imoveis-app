@@ -2367,6 +2367,9 @@ function saveContrato() {
   toast((id ? 'Contrato atualizado!' : 'Contrato cadastrado!') + _parcelaMsg + _caucaoMsg, 'success');
 }
 
+// Arredonda para 2 casas
+const _round2 = v => Math.round(v * 100) / 100;
+
 // Gera um registro financeiro por mês de vigência do contrato
 function gerarParcelasContrato(c) {
   if (!c.dataInicio || !c.dataTermino) return 0;
@@ -2381,25 +2384,39 @@ function gerarParcelasContrato(c) {
   const prazo = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth());
   if (prazo <= 0) return 0;
 
+  // Fator pro-rata da 1ª parcela: dias restantes do mês de início / total de dias do mês
+  let fatorPrimeira = 1;
+  if (c.dataPrimeiraCobranca && c.dataInicio) {
+    const dInicio = new Date(c.dataInicio + 'T12:00:00');
+    const diasNoMes = new Date(dInicio.getFullYear(), dInicio.getMonth() + 1, 0).getDate();
+    const diasRestantes = diasNoMes - dInicio.getDate() + 1;
+    fatorPrimeira = _round2(diasRestantes / diasNoMes);
+  }
+
   for (let i = 0; i < prazo; i++) {
     const totalMeses = d1.getMonth() + i;
     const ano = d1.getFullYear() + Math.floor(totalMeses / 12);
-    const mes = totalMeses % 12; // 0-indexed
-    // Para a 1ª parcela usa o dia exato de dataPrimeiraCobranca; demais usam diaVencimento
+    const mes = totalMeses % 12;
     const diaRef = (i === 0 && c.dataPrimeiraCobranca) ? d1.getDate() : diaVenc;
     const ultimoDia = new Date(ano, mes + 1, 0).getDate();
     const dia = Math.min(diaRef, ultimoDia);
     const dataVenc = `${ano}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+
+    const fator = (i === 0 && c.dataPrimeiraCobranca) ? fatorPrimeira : 1;
+    const valorContrato  = _round2((c.valorMensal    || 0) * fator);
+    const consumoAgua    = _round2((c.taxaAgua        || 0) * fator);
+    const taxaManutencao = _round2((c.taxaManutencao  || 0) * fator);
+    const taxasExtras    = _round2((c.taxasExtras      || 0) * fator);
 
     DB.financeiro.push({
       id:              nextId(DB.financeiro),
       dataPagamento:   dataVenc,
       contrato:        c.codigo,
       inquilino:       c.inquilino || '',
-      valorContrato:   c.valorMensal    || 0,
-      consumoAgua:     c.taxaAgua       || 0,
-      taxaManutencao:  c.taxaManutencao || 0,
-      taxasExtras:     c.taxasExtras    || 0,
+      valorContrato,
+      consumoAgua,
+      taxaManutencao,
+      taxasExtras,
       leituraAnterior: 0,
       leituraAtual:    0,
       valorKwh:        0,
@@ -2409,9 +2426,11 @@ function gerarParcelasContrato(c) {
       diasAtraso:      0,
       pctMora:         0,
       valorMora:       0,
-      totalGeral:      (c.valorMensal || 0) + (c.taxaAgua || 0) + (c.taxaManutencao || 0) + (c.taxasExtras || 0),
+      totalGeral:      _round2(valorContrato + consumoAgua + taxaManutencao + taxasExtras),
       valorRecebido:   0,
-      observacoes:     '',
+      observacoes:     i === 0 && c.dataPrimeiraCobranca
+        ? `Pro-rata: ${Math.round(fatorPrimeira * 100)}% (${new Date(c.dataInicio + 'T12:00:00').getDate()}/${new Date(c.dataInicio + 'T12:00:00').toLocaleString('pt-BR',{month:'long'})})`
+        : '',
       gerado:          true,
     });
   }
