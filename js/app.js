@@ -3653,8 +3653,13 @@ function openManutencaoPreventiva(id = null) {
   document.getElementById('mprev-custom-group').style.display = 'none';
 
   const imovelSel = document.getElementById('mprev-campo-imovel');
-  imovelSel.innerHTML = '<option value="Geral (Todo o Prédio)">Geral (Todo o Prédio)</option>' +
-    DB.imoveis.map(i => `<option value="${i.nome}">${i.nome}</option>`).join('');
+  const predioOpts = (DB.predios || []).length > 0
+    ? `<optgroup label="🏢 Prédios">${(DB.predios || []).map(p => `<option value="Prédio: ${p.nome}">🏢 ${p.nome}</option>`).join('')}</optgroup>`
+    : '';
+  const imovelOpts = DB.imoveis.length > 0
+    ? `<optgroup label="🏠 Unidades / Imóveis">${DB.imoveis.map(i => `<option value="${i.nome}">${i.nome}</option>`).join('')}</optgroup>`
+    : '';
+  imovelSel.innerHTML = predioOpts + imovelOpts;
 
   if (id) {
     const item = DB.manutencaoPreventiva.find(x => x.id === id);
