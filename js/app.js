@@ -5519,16 +5519,19 @@ function _portalRenderBoletos(inq) {
 }
 
 // ── INIT ───────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+function _initApp() {
   document.querySelectorAll('.nav-item').forEach(el => {
     el.addEventListener('click', () => navigate(el.dataset.page));
   });
-
-  // Polling de webhooks Asaas a cada 30s (baixa automática)
   _pollWebhookEvents();
   setInterval(_pollWebhookEvents, 30000);
-
-  // Inicia autenticação — mostra login ou app conforme sessão
   initAuth();
   _autoDetectAsaas();
-});
+}
+
+// Funciona tanto com carregamento estático quanto dinâmico de scripts
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _initApp);
+} else {
+  _initApp();
+}
