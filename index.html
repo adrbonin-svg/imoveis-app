@@ -835,7 +835,7 @@
       <button class="modal-close" onclick="closeModal('modal-imovel')">✕</button>
     </div>
     <div class="modal-body">
-      <form id="form-imovel">
+      <form id="form-imovel" onsubmit="return false">
         <div class="form-group" style="margin-bottom:16px">
           <label>Prédio *</label>
           <select name="predioId" id="imo-predio-select" onchange="preencherEnderecoPredio()" required>
@@ -956,7 +956,7 @@
       <button class="modal-close" onclick="closeModal('modal-predio')">✕</button>
     </div>
     <div class="modal-body">
-      <form id="form-predio">
+      <form id="form-predio" onsubmit="return false">
         <div class="form-grid">
           <div class="form-group form-col-2">
             <label>Nome do Prédio *</label>
@@ -1074,7 +1074,7 @@
       <button class="modal-close" onclick="closeModal('modal-inquilino')">✕</button>
     </div>
     <div class="modal-body">
-      <form id="form-inquilino">
+      <form id="form-inquilino" onsubmit="return false">
         <!-- TIPO DE PESSOA -->
         <div class="tipo-pessoa-toggle">
           <button type="button" class="tipo-btn active" id="tipo-btn-fisica" onclick="toggleTipoPessoa('fisica')">Pessoa Física</button>
@@ -1281,7 +1281,7 @@
       <button class="modal-close" onclick="closeModal('modal-contrato')">✕</button>
     </div>
     <div class="modal-body">
-      <form id="form-contrato">
+      <form id="form-contrato" onsubmit="return false">
         <div class="form-grid">
           <div class="form-group">
             <label>Código do Contrato *</label>
@@ -1387,7 +1387,7 @@
       <button class="modal-close" onclick="closeModal('modal-financeiro')">✕</button>
     </div>
     <div class="modal-body">
-      <form id="form-financeiro" oninput="calcFinanceiro()">
+      <form id="form-financeiro" oninput="calcFinanceiro()" onsubmit="return false">
 
         <!-- 1. IDENTIFICAÇÃO -->
         <div class="form-section-label">Identificação</div>
@@ -1547,7 +1547,7 @@
     </div>
     <div class="modal-body">
       <div id="modal-baixa-info" style="background:var(--gray-50);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;display:flex;gap:24px;flex-wrap:wrap"></div>
-      <form id="form-baixa">
+      <form id="form-baixa" onsubmit="return false">
         <div class="form-grid">
           <div class="form-group">
             <label>Data do Pagamento *</label>
@@ -1596,7 +1596,7 @@
       <button class="modal-close" onclick="closeModal('modal-manutencao')">✕</button>
     </div>
     <div class="modal-body">
-      <form id="form-manutencao">
+      <form id="form-manutencao" onsubmit="return false">
         <div class="form-section-label">Dados da Manutenção</div>
         <div class="form-grid">
           <div class="form-group form-col-2">
@@ -1654,7 +1654,7 @@
       <button class="modal-close" onclick="closeModal('modal-usuario')">✕</button>
     </div>
     <div class="modal-body">
-      <form id="form-usuario">
+      <form id="form-usuario" onsubmit="return false">
         <div class="form-section-label">Dados de Acesso</div>
         <div class="form-grid">
           <div class="form-group form-col-2">
@@ -1739,7 +1739,7 @@
       <button class="modal-close" onclick="closeModal('modal-alterar-senha')">✕</button>
     </div>
     <div class="modal-body">
-      <form id="form-alterar-senha">
+      <form id="form-alterar-senha" onsubmit="return false">
         <input type="hidden" name="userId">
         <div class="form-grid">
           <div class="form-group form-col-2">
@@ -1772,7 +1772,7 @@
       <button class="modal-close" onclick="closeModal('modal-mprev')">✕</button>
     </div>
     <div class="modal-body">
-      <form id="form-mprev">
+      <form id="form-mprev" onsubmit="return false">
         <div class="form-section-label">Identificação</div>
         <div class="form-grid">
           <div class="form-group form-col-2">
@@ -1850,7 +1850,7 @@
     </div>
     <div class="modal-body">
       <div id="exec-prev-info" style="background:#f0f4ff;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:14px"></div>
-      <form id="form-exec-prev">
+      <form id="form-exec-prev" onsubmit="return false">
         <input type="hidden" name="prevId">
         <div class="form-grid">
           <div class="form-group">
