@@ -13,3 +13,5 @@ services:
         value: sandbox
       - key: ASAAS_WEBHOOK_TOKEN
         sync: false
+      - key: MONGODB_URI
+        sync: false

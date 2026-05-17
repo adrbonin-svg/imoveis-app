@@ -1,10 +1,30 @@
 require('dotenv').config();
-const express = require('express');
-const path    = require('path');
-const fs      = require('fs');
+const express      = require('express');
+const path         = require('path');
+const fs           = require('fs');
+const { MongoClient } = require('mongodb');
+
+// ── MongoDB (persistência permanente entre deploys) ─────
+let _mongo = null;
+
+async function getCol() {
+  if (!process.env.MONGODB_URI) return null;
+  try {
+    if (!_mongo) {
+      const client = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+      await client.connect();
+      _mongo = client.db('imoveis').collection('appdata');
+    }
+    return _mongo;
+  } catch (e) {
+    console.error('[MongoDB] Conexão falhou:', e.message);
+    _mongo = null;
+    return null;
+  }
+}
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname), {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.html')) {
@@ -52,19 +72,31 @@ function writeEnvFile(vars) {
   fs.writeFileSync(ENV_FILE, content, 'utf8');
 }
 
-// ── Banco de dados do app (persistência server-side) ───
+// ── Banco de dados do app (MongoDB → fallback arquivo) ─
 const DB_FILE = path.join(__dirname, 'db.json');
 
-app.get('/api/db', (req, res) => {
+app.get('/api/db', async (req, res) => {
+  const col = await getCol();
+  if (col) {
+    const doc = await col.findOne({ _id: 'main' });
+    if (doc) { const { _id, ...data } = doc; return res.json(data); }
+    return res.status(404).json({ error: 'Sem dados' });
+  }
+  // Fallback: arquivo local (apagado a cada deploy — apenas dev)
   try {
-    const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-    res.json(data);
+    res.json(JSON.parse(fs.readFileSync(DB_FILE, 'utf8')));
   } catch {
     res.status(404).json({ error: 'Sem dados salvos' });
   }
 });
 
-app.post('/api/db', (req, res) => {
+app.post('/api/db', async (req, res) => {
+  const col = await getCol();
+  if (col) {
+    await col.replaceOne({ _id: 'main' }, { _id: 'main', ...req.body }, { upsert: true });
+    return res.json({ ok: true });
+  }
+  // Fallback: arquivo local
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(req.body), 'utf8');
     res.json({ ok: true });
