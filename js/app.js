@@ -641,17 +641,12 @@ function renderDashboard() {
     return f.dataPagamento < todayStr;
   });
 
-  // Contratos ativos SEM registro financeiro pago no mês atual
-  // (excluindo os que já aparecem em pgtoVencidos para evitar duplicação)
-  const contratosJaNosVencidos = new Set(pgtoVencidos.map(f => f.contrato));
-  const cobrancasPendentes = DB.contratos.filter(c => c.status === 'ATIVO').filter(c => {
-    if (contratosJaNosVencidos.has(c.codigo)) return false;
-    return !DB.financeiro.some(f =>
-      f.contrato === c.codigo &&
-      f.tipo !== 'caucao' &&
-      _finPago(f) &&
-      (() => { const d = new Date((f.dataPagamento || '') + 'T12:00:00'); return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual; })()
-    );
+  // Cobranças pendentes: registros não pagos com vencimento >= hoje (ainda não vencidos)
+  const cobrancasPendentes = DB.financeiro.filter(f => {
+    if (f.tipo === 'caucao') return false;
+    if (_finPago(f)) return false;
+    if ((f.totalGeral || 0) <= 0) return false;
+    return f.dataPagamento >= todayStr;
   });
 
   const totalAlertas = cobrancasPendentes.length + pgtoVencidos.length;
@@ -820,15 +815,20 @@ function renderDashboard() {
   '</tr>';
 
   const tbodyCob = document.getElementById('dash-cobrancas-tbody');
-  // Normaliza ambas as fontes num array comum para poder ordenar
-  const periodo = `${MESES[mesAtual - 1]}/${anoAtual}`;
   let cobItems = [
-    ...cobrancasPendentes.map(c => ({
-      _tipo: 'sem_pgto', _id: null, _cid: c.id,
-      contrato: c.codigo, imovel: c.imovel,
-      inquilino: c.inquilino || '—', valor: c.valorMensal,
-      _periodoStr: periodo, _dataVenc: '',
-    })),
+    ...cobrancasPendentes.map(f => {
+      const d = new Date(f.dataPagamento + 'T12:00:00');
+      const ctrato = DB.contratos.find(c => c.codigo === f.contrato);
+      return {
+        _tipo: 'sem_pgto', _id: f.id, _cid: ctrato?.id,
+        contrato: f.contrato,
+        imovel: ctrato?.imovel || f.imovel || '—',
+        inquilino: f.inquilino || ctrato?.inquilino || '—',
+        valor: f.totalGeral || 0,
+        _periodoStr: `${MESES[d.getMonth()]}/${d.getFullYear()}`,
+        _dataVenc: f.dataPagamento,
+      };
+    }),
     ...pgtoVencidos.map(f => {
       const d = new Date(f.dataPagamento + 'T12:00:00');
       const ctrato = DB.contratos.find(c => c.codigo === f.contrato);
@@ -848,14 +848,14 @@ function renderDashboard() {
   const linhasCobr = cobItems.map(item => {
     if (item._tipo === 'sem_pgto') {
       return `
-      <tr class="tr-vencido tr-link" title="Clique para registrar pagamento" onclick="irParaFinanceiro(null,'${item.contrato}')">
+      <tr class="tr-vencido tr-link" title="Clique para registrar pagamento" onclick="irParaFinanceiro(${item._id})">
         <td><strong>${item.contrato}</strong></td>
         <td>${item.imovel}</td>
         <td>${item.inquilino}</td>
         <td><strong style="color:var(--danger)">${fmt(item.valor)}</strong></td>
         <td><span class="periodo-chip">${item._periodoStr}</span></td>
-        <td><span class="badge badge-red">Sem pgto no mês</span></td>
-        <td class="td-acao">➕ Registrar</td>
+        <td><span class="badge badge-yellow">Vence ${fmtDate(item._dataVenc)}</span></td>
+        <td class="td-acao">✏️ Registrar</td>
       </tr>`;
     } else {
       return `
@@ -871,7 +871,7 @@ function renderDashboard() {
     }
   });
   tbodyCob.innerHTML = linhasCobr.length === 0
-    ? `<tr><td colspan="7"><div class="empty"><div class="empty-icon" style="font-size:28px">✅</div><p>Nenhuma cobrança pendente no mês atual</p></div></td></tr>`
+    ? `<tr><td colspan="7"><div class="empty"><div class="empty-icon" style="font-size:28px">✅</div><p>Nenhuma cobrança pendente</p></div></td></tr>`
     : linhasCobr.join('');
 
   // Últimos pagamentos
