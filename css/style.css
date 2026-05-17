@@ -1827,6 +1827,12 @@ tr:hover td { background: var(--gray-50); }
 .ck-inq-table th { background: var(--gray-100); padding: 6px 10px; color: var(--gray-600); font-weight: 600; text-align: left; }
 .ck-inq-table td { padding: 6px 10px; border-top: 1px solid var(--gray-100); vertical-align: middle; }
 .ck-inq-table tr:hover td { background: #f8faff; }
+.ck-ass-bloco {
+  background: #f0fdf4; border-top: 1px solid #bbf7d0;
+  padding: 8px 14px; font-size: 12px; color: var(--gray-700);
+}
+.ck-ass-titulo { font-weight: 700; color: #15803d; margin-bottom: 4px; font-size: 12px; }
+.ck-ass-linha { margin-bottom: 2px; }
 .ck-status-ok { color: var(--success); font-size: 16px; }
 .ck-status-no { color: var(--gray-300); font-size: 16px; }
 /* ══ INDICADOR DE VISTORIA PENDENTE ════════════════════ */
