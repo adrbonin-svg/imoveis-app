@@ -641,17 +641,10 @@ function renderDashboard() {
     return f.dataPagamento < todayStr;
   });
 
-  // Cobranças pendentes: registros não pagos com vencimento nos próximos 30 dias
-  const d30 = new Date(now); d30.setDate(d30.getDate() + 30);
-  const next30Str = d30.toISOString().split('T')[0];
-  const cobrancasPendentes = DB.financeiro.filter(f => {
-    if (f.tipo === 'caucao') return false;
-    if (_finPago(f)) return false;
-    if ((f.totalGeral || 0) <= 0) return false;
-    return f.dataPagamento >= todayStr && f.dataPagamento <= next30Str;
-  });
+  // Pagamentos em atraso = somente os já vencidos (pgtoVencidos)
+  const cobrancasPendentes = [];
 
-  const totalAlertas = cobrancasPendentes.length + pgtoVencidos.length;
+  const totalAlertas = pgtoVencidos.length;
 
   document.getElementById('dash-total-imoveis').textContent = total;
   document.getElementById('dash-ocupados').textContent = ocupados;
