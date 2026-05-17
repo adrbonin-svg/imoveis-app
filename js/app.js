@@ -1146,6 +1146,7 @@ function renderInquilinos() {
             <div class="actions">
               <button class="btn btn-primary btn-sm" onclick="openInquilinoFicha(${i.id})">Ver Ficha</button>
               ${_podeAcao('inquilinos','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openInquilino(${i.id})">Editar</button>` : ''}
+              ${_podeAcao('inquilinos','editar') ? `<button class="btn btn-ghost btn-sm" onclick="recriarAcessoInquilino(${i.id})" title="Criar ou resetar login/senha usando o CPF">🔑 Acesso</button>` : ''}
               ${_podeAcao('inquilinos','excluir') ? `<button class="btn btn-danger btn-sm" onclick="deleteInquilino(${i.id})">Excluir</button>` : ''}
             </div>
           </td>
@@ -1425,6 +1426,54 @@ function deleteInquilino(id) {
   saveData();
   renderInquilinos();
   toast('Inquilino excluído');
+}
+
+// Cria ou recria o acesso do inquilino usando o CPF como login e senha
+function recriarAcessoInquilino(inqId) {
+  const inq = DB.inquilinos.find(x => x.id === inqId);
+  if (!inq) return;
+  const cpfLimpo = (inq.cpf || '').replace(/\D/g, '');
+  if (!cpfLimpo) {
+    toast('CPF não cadastrado — edite o inquilino e preencha o CPF primeiro', 'error');
+    return;
+  }
+  let u = DB.usuarios.find(x => x.perfil === 'inquilino' && x.inquilinoId === inqId);
+  if (u) {
+    u.usuario = cpfLimpo;
+    u.senha   = cpfLimpo;
+    u.nome    = inq.nome;
+    u.ativo   = true;
+    toast(`Acesso resetado — usuário: ${cpfLimpo} · senha: ${cpfLimpo}`, 'success');
+  } else {
+    DB.usuarios.push({
+      id:          nextId(DB.usuarios),
+      nome:        inq.nome,
+      usuario:     cpfLimpo,
+      senha:       cpfLimpo,
+      perfil:      'inquilino',
+      inquilinoId: inqId,
+      permissoes:  { portal: { ver: true } },
+      ativo:       true,
+    });
+    toast(`Acesso criado — usuário: ${cpfLimpo} · senha: ${cpfLimpo}`, 'success');
+  }
+  saveData();
+  renderInquilinos();
+}
+
+// Reseta login e senha de um usuário inquilino para o CPF (chamado da aba Usuários)
+function resetarSenhaInquilino(userId) {
+  const u = DB.usuarios.find(x => x.id === userId && x.perfil === 'inquilino');
+  if (!u) return;
+  const inq = DB.inquilinos.find(x => x.id === u.inquilinoId);
+  const cpfLimpo = (inq?.cpf || '').replace(/\D/g, '') || u.usuario;
+  if (!cpfLimpo) { toast('CPF não encontrado para este inquilino', 'error'); return; }
+  u.usuario = cpfLimpo;
+  u.senha   = cpfLimpo;
+  u.ativo   = true;
+  saveData();
+  renderUsuarios();
+  toast(`Acesso resetado — usuário: ${cpfLimpo} · senha: ${cpfLimpo}`, 'success');
 }
 
 // ── IMÓVEIS ────────────────────────────────────────────
@@ -3688,6 +3737,7 @@ function renderUsuarios() {
         ${!isMe && !isInq ? `<button class="btn btn-danger btn-sm" onclick="deleteUsuario(${u.id})">Excluir</button>` : ''}
         ${isMe ? '<span style="font-size:11px;color:var(--gray-400)">(você)</span>' : ''}
         ${isInq ? `<button class="btn btn-ghost btn-sm" onclick="_toggleInquilinoAcesso(${u.id})">${u.ativo ? '🔒 Desativar' : '🔓 Ativar'}</button>` : ''}
+        ${isInq ? `<button class="btn btn-ghost btn-sm" onclick="resetarSenhaInquilino(${u.id})" title="Resetar login e senha para o CPF do inquilino">🔑 Resetar</button>` : ''}
       </td>
     </tr>`;
   }).join('');
