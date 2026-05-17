@@ -279,6 +279,13 @@ app.get('/api/asaas/payment/:id/pdf', async (req, res) => {
   }
 });
 
+// ── Registro de assinatura eletrônica ──────────────────
+app.post('/api/registrar-assinatura', (req, res) => {
+  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress || 'desconhecido';
+  const agente = req.headers['user-agent'] || 'desconhecido';
+  res.json({ ip, agente, registradoEm: new Date().toISOString() });
+});
+
 // ── Webhook ─────────────────────────────────────────────
 app.post('/webhook/asaas', (req, res) => {
   if (cfg.webhookToken && req.headers['asaas-access-token'] !== cfg.webhookToken) {
