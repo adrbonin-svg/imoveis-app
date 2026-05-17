@@ -613,25 +613,45 @@ function renderDashboard() {
   const disponiveis = DB.imoveis.filter(i => i.status === 'DISPONÍVEL').length;
   const contratoAtivo = DB.contratos.filter(c => c.status === 'ATIVO').length;
   const receitaMensal = DB.contratos.filter(c => c.status === 'ATIVO').reduce((s, c) => s + c.valorMensal, 0);
-  const receitaRecebida = DB.financeiro.reduce((s, f) => s + f.valorRecebido, 0);
-  const manutPendente = DB.manutencao.filter(m => m.status !== 'Concluído').length;
-  const pct = total > 0 ? Math.round((ocupados / total) * 100) : 0;
-
-  // Cobranças pendentes: contratos ativos sem pagamento recebido no mês atual
   const now = new Date();
   const mesAtual = now.getMonth() + 1;
   const anoAtual = now.getFullYear();
-  const cobrancasPendentes = DB.contratos.filter(c => c.status === 'ATIVO').filter(c => {
-    return !DB.financeiro.some(f =>
-      f.contrato === c.codigo &&
-      f.valorRecebido > 0 &&
-      (() => { const d = new Date(f.dataPagamento + 'T12:00:00'); return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual; })()
-    );
+  const todayStr = today();
+
+  // Receita recebida apenas no mês atual
+  const receitaRecebida = DB.financeiro
+    .filter(f => {
+      const d = new Date((f.dataPagamento || '') + 'T12:00:00');
+      return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual;
+    })
+    .reduce((s, f) => s + (f.valorRecebido || 0), 0);
+
+  const manutPendente = DB.manutencao.filter(m => m.status !== 'Concluído').length;
+  const pct = total > 0 ? Math.round((ocupados / total) * 100) : 0;
+
+  // Pagamentos vencidos: registros passados, sem pagamento, não caução, não confirmado no Asaas
+  const pgtoVencidos = DB.financeiro.filter(f => {
+    if (f.tipo === 'caucao') return false;
+    if ((f.valorRecebido || 0) > 0) return false;
+    if (['RECEIVED', 'CONFIRMED'].includes(f.asaasStatus)) return false;
+    return f.dataPagamento < todayStr;
   });
 
-  // Pagamentos registrados vencidos (dataPagamento no passado, valorRecebido = 0)
-  const todayStr = today();
-  const pgtoVencidos = DB.financeiro.filter(f => f.dataPagamento < todayStr && f.valorRecebido === 0);
+  // Contratos ativos SEM nenhum registro financeiro (não caução) no mês atual
+  // e que também NÃO estão já cobertos pelos pgtoVencidos
+  const contratosComVencidoNomes = new Set(pgtoVencidos.map(f => f.contrato));
+  const cobrancasPendentes = DB.contratos.filter(c => c.status === 'ATIVO').filter(c => {
+    // já aparece como vencido → não duplicar
+    if (contratosComVencidoNomes.has(c.codigo)) return false;
+    // verifica se tem registro pago no mês atual
+    const temPagoMes = DB.financeiro.some(f =>
+      f.contrato === c.codigo &&
+      f.tipo !== 'caucao' &&
+      (f.valorRecebido > 0 || ['RECEIVED','CONFIRMED'].includes(f.asaasStatus)) &&
+      (() => { const d = new Date(f.dataPagamento + 'T12:00:00'); return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual; })()
+    );
+    return !temPagoMes;
+  });
 
   const totalAlertas = cobrancasPendentes.length + pgtoVencidos.length;
 
@@ -810,10 +830,13 @@ function renderDashboard() {
     })),
     ...pgtoVencidos.map(f => {
       const d = new Date(f.dataPagamento + 'T12:00:00');
+      const ctrato = DB.contratos.find(c => c.codigo === f.contrato);
       return {
         _tipo: 'vencido', _id: f.id, _cid: null,
-        contrato: f.contrato, imovel: '—',
-        inquilino: f.inquilino || '—', valor: f.valorContrato,
+        contrato: f.contrato,
+        imovel: ctrato?.imovel || f.imovel || '—',
+        inquilino: f.inquilino || '—',
+        valor: f.totalGeral || f.valorContrato || 0,
         _periodoStr: `${MESES[d.getMonth()]}/${d.getFullYear()}`,
         _dataVenc: f.dataPagamento,
       };
