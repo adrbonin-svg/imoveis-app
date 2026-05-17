@@ -5646,36 +5646,66 @@ function _portalRenderBoletos(inq) {
     else if (atrasado)                 statusHtml = `<span class="badge badge-red">⚠️ Vencido</span>`;
     else                               statusHtml = `<span class="badge badge-yellow">⏳ Pendente</span>`;
 
-    const boletoBtn = f.asaasPaymentId && !['RECEIVED','CONFIRMED','CANCELED'].includes(f.asaasStatus)
+    const pago = rec >= tot && tot > 0
+      || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
+
+    const boletoBtn = f.asaasPaymentId && !pago && !['CANCELED'].includes(f.asaasStatus)
       ? `<a href="/api/asaas/payment/${f.asaasPaymentId}/pdf" target="_blank" class="btn btn-primary btn-sm">🏦 Ver Boleto</a>`
       : '';
 
     const isCaucao = f.tipo === 'caucao';
-    const titulo   = isCaucao ? (f.observacoes || 'Caução') : f.contrato;
-    const subTitulo = isCaucao ? f.contrato : `Vencimento: ${fmtDate(venc)}`;
 
-    const gridItens = isCaucao
-      ? `<div><span class="portal-label">${f.observacoes || 'Caução'}</span><strong style="color:var(--gray-800)">${fmt(tot)}</strong></div>
-         <div><span class="portal-label">Pago</span><strong style="color:var(--success)">${fmt(rec)}</strong></div>`
-      : `<div><span class="portal-label">Total</span><strong style="color:var(--gray-800)">${fmt(tot)}</strong></div>
-         <div><span class="portal-label">Pago</span><strong style="color:var(--success)">${fmt(rec)}</strong></div>
-         <div><span class="portal-label">Aluguel</span><span>${fmt(f.valorContrato)}</span></div>
-         <div><span class="portal-label">Água</span><span>${f.consumoAgua > 0 ? fmt(f.consumoAgua) : '—'}</span></div>`;
+    if (isCaucao) {
+      return `
+      <div class="portal-card ${atrasado && rec < tot ? 'portal-card-atrasado' : ''}">
+        <div class="portal-card-head">
+          <div>
+            <strong>${f.observacoes || 'Caução'}</strong>
+            <div style="font-size:12px;color:var(--gray-400);margin-top:2px">Contrato: ${f.contrato} · Vencimento: ${fmtDate(venc)}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">${statusHtml}${boletoBtn}</div>
+        </div>
+        <div class="portal-grid">
+          <div><span class="portal-label">${f.observacoes || 'Caução'}</span><strong style="color:var(--gray-800)">${fmt(tot)}</strong></div>
+          <div><span class="portal-label">Pago</span><strong style="color:var(--success)">${fmt(rec)}</strong></div>
+        </div>
+      </div>`;
+    }
+
+    // Título: "Aluguel — mês/ano" derivado da data de vencimento
+    const mesAno = venc
+      ? new Date(venc + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+      : '';
+    const titulo = `Aluguel — ${mesAno}`;
+
+    // Detalhamento: só mostra linhas com valor > 0
+    const detalhes = [
+      { label: 'Aluguel',       val: f.valorContrato  || 0 },
+      { label: 'Água',          val: f.consumoAgua    || 0 },
+      { label: 'Manutenção',    val: f.taxaManutencao || 0 },
+      { label: 'Energia',       val: f.totalEnergia   || 0 },
+      { label: 'Extras',        val: f.taxasExtras    || 0 },
+      { label: 'Multa',         val: f.valorMulta     || 0 },
+      { label: 'Juros/Mora',    val: f.valorMora      || 0 },
+    ].filter(x => x.val > 0);
+
+    const linhasDetalhe = detalhes.map(x =>
+      `<div><span class="portal-label">${x.label}</span><span>${fmt(x.val)}</span></div>`
+    ).join('');
 
     return `
     <div class="portal-card ${atrasado && rec < tot ? 'portal-card-atrasado' : ''}">
       <div class="portal-card-head">
         <div>
           <strong>${titulo}</strong>
-          <div style="font-size:12px;color:var(--gray-400);margin-top:2px">${isCaucao ? `Contrato: ${subTitulo} · Vencimento: ${fmtDate(venc)}` : subTitulo}</div>
+          <div style="font-size:12px;color:var(--gray-400);margin-top:2px">Contrato: ${f.contrato} · Vencimento: ${fmtDate(venc)}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          ${statusHtml}
-          ${boletoBtn}
-        </div>
+        <div style="display:flex;align-items:center;gap:8px">${statusHtml}${boletoBtn}</div>
       </div>
       <div class="portal-grid">
-        ${gridItens}
+        <div><span class="portal-label">Total</span><strong style="color:var(--gray-800);font-size:15px">${fmt(tot)}</strong></div>
+        <div><span class="portal-label">Pago</span><strong style="color:var(--success)">${fmt(rec)}</strong></div>
+        ${linhasDetalhe}
       </div>
     </div>`;
   }).join('');
