@@ -2206,11 +2206,20 @@ function saveContrato() {
   _syncImovelStatus(data.imovel);
   if (oldImovel && oldImovel !== data.imovel) _syncImovelStatus(oldImovel);
 
-  // Gera parcelas automáticas apenas em contrato NOVO
+  // Gera parcelas e caução automáticas
   let qtdParcelas = 0;
+  let qtdCaucao = 0;
   if (!id) {
     const novoContrato = DB.contratos[DB.contratos.length - 1];
     qtdParcelas = gerarParcelasContrato(novoContrato);
+    qtdCaucao   = gerarCaucaoContrato(novoContrato);
+  } else if ((existing?.caucao || 0) !== data.caucao) {
+    // Caução foi alterada: remove entradas não pagas e regenera
+    DB.financeiro = DB.financeiro.filter(f =>
+      !(f.tipo === 'caucao' && f.contrato === data.codigo && !(f.valorRecebido > 0))
+    );
+    const contratoAtualizado = DB.contratos.find(x => x.id === id);
+    if (contratoAtualizado) qtdCaucao = gerarCaucaoContrato(contratoAtualizado);
   }
 
   saveData();
@@ -2218,8 +2227,9 @@ function saveContrato() {
   renderContratos();
   renderImoveis();
   renderFinanceiro();
-  const msg = id ? 'Contrato atualizado!' : `Contrato cadastrado! ${qtdParcelas > 0 ? `${qtdParcelas} parcela${qtdParcelas > 1 ? 's' : ''} gerada${qtdParcelas > 1 ? 's' : ''} no Financeiro.` : ''}`;
-  toast(msg, 'success');
+  const _parcelaMsg = qtdParcelas > 0 ? ` ${qtdParcelas} parcela${qtdParcelas > 1 ? 's' : ''} gerada${qtdParcelas > 1 ? 's' : ''}.` : '';
+  const _caucaoMsg  = qtdCaucao  > 0 ? ` ${qtdCaucao} entrada${qtdCaucao > 1 ? 's' : ''} de caução lançada${qtdCaucao > 1 ? 's' : ''}.` : '';
+  toast((id ? 'Contrato atualizado!' : 'Contrato cadastrado!') + _parcelaMsg + _caucaoMsg, 'success');
 }
 
 // Gera um registro financeiro por mês de vigência do contrato
@@ -2264,6 +2274,52 @@ function gerarParcelasContrato(c) {
     });
   }
   return prazo;
+}
+
+function gerarCaucaoContrato(c) {
+  if (!c.caucao || c.caucao <= 0) return 0;
+  const n = c.caucaoParcelas || 1;
+  const valorParcela = c.caucao / n;
+  const dataBase = c.dataInicio || today();
+  const d1 = new Date(dataBase + 'T12:00:00');
+
+  for (let i = 0; i < n; i++) {
+    const totalMeses = d1.getMonth() + i;
+    const ano = d1.getFullYear() + Math.floor(totalMeses / 12);
+    const mes = totalMeses % 12;
+    const ultimoDia = new Date(ano, mes + 1, 0).getDate();
+    const dia = Math.min(d1.getDate(), ultimoDia);
+    const dataVenc = `${ano}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    const parcelLabel = n > 1 ? `Caução ${i + 1}/${n}` : 'Caução (à vista)';
+    const formaLabel = c.caucaoFormaPagamento ? ` — ${c.caucaoFormaPagamento}` : '';
+
+    DB.financeiro.push({
+      id:              nextId(DB.financeiro),
+      tipo:            'caucao',
+      dataPagamento:   dataVenc,
+      contrato:        c.codigo,
+      inquilino:       c.inquilino || '',
+      valorContrato:   0,
+      caucaoValor:     valorParcela,
+      consumoAgua:     0,
+      taxaManutencao:  0,
+      taxasExtras:     0,
+      leituraAnterior: 0,
+      leituraAtual:    0,
+      valorKwh:        0,
+      totalEnergia:    0,
+      pctMulta:        0,
+      valorMulta:      0,
+      diasAtraso:      0,
+      pctMora:         0,
+      valorMora:       0,
+      totalGeral:      valorParcela,
+      valorRecebido:   0,
+      observacoes:     parcelLabel + formaLabel,
+      gerado:          true,
+    });
+  }
+  return n;
 }
 
 function deleteContrato(id) {
@@ -2677,9 +2733,12 @@ function renderFinanceiro() {
     : list.map(f => `
       <tr>
         <td>${fmtDate(f.dataPagamento)}</td>
-        <td><strong><span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.contrato)},renderFinanceiro)" title="Filtrar por este contrato">${f.contrato}</span></strong></td>
+        <td>
+          <strong><span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.contrato)},renderFinanceiro)" title="Filtrar por este contrato">${f.contrato}</span></strong>
+          ${f.tipo === 'caucao' ? `<br><span class="badge badge-yellow" style="font-size:10px;margin-top:2px">🔒 ${f.observacoes || 'Caução'}</span>` : ''}
+        </td>
         <td>${f.inquilino ? `<span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.inquilino)},renderFinanceiro)" title="Filtrar por este inquilino">${f.inquilino}</span>` : '—'}</td>
-        <td>${fmt(f.valorContrato)}</td>
+        <td>${f.tipo === 'caucao' ? `<span style="color:var(--gray-400);font-size:11px">—</span>` : fmt(f.valorContrato)}</td>
         <td>${(f.consumoAgua || 0) > 0 ? fmt(f.consumoAgua) : '—'}</td>
         <td>${(f.totalEnergia || 0) > 0 ? fmt(f.totalEnergia) : '—'}</td>
         <td>${((f.valorMulta || 0) > 0 || (f.valorMora || 0) > 0)
