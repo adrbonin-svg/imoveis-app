@@ -5650,12 +5650,24 @@ function _portalRenderBoletos(inq) {
       ? `<a href="/api/asaas/payment/${f.asaasPaymentId}/pdf" target="_blank" class="btn btn-primary btn-sm">🏦 Ver Boleto</a>`
       : '';
 
+    const isCaucao = f.tipo === 'caucao';
+    const titulo   = isCaucao ? (f.observacoes || 'Caução') : f.contrato;
+    const subTitulo = isCaucao ? f.contrato : `Vencimento: ${fmtDate(venc)}`;
+
+    const gridItens = isCaucao
+      ? `<div><span class="portal-label">${f.observacoes || 'Caução'}</span><strong style="color:var(--gray-800)">${fmt(tot)}</strong></div>
+         <div><span class="portal-label">Pago</span><strong style="color:var(--success)">${fmt(rec)}</strong></div>`
+      : `<div><span class="portal-label">Total</span><strong style="color:var(--gray-800)">${fmt(tot)}</strong></div>
+         <div><span class="portal-label">Pago</span><strong style="color:var(--success)">${fmt(rec)}</strong></div>
+         <div><span class="portal-label">Aluguel</span><span>${fmt(f.valorContrato)}</span></div>
+         <div><span class="portal-label">Água</span><span>${f.consumoAgua > 0 ? fmt(f.consumoAgua) : '—'}</span></div>`;
+
     return `
     <div class="portal-card ${atrasado && rec < tot ? 'portal-card-atrasado' : ''}">
       <div class="portal-card-head">
         <div>
-          <strong>${f.contrato}</strong>
-          <div style="font-size:12px;color:var(--gray-400);margin-top:2px">Vencimento: ${fmtDate(venc)}</div>
+          <strong>${titulo}</strong>
+          <div style="font-size:12px;color:var(--gray-400);margin-top:2px">${isCaucao ? `Contrato: ${subTitulo} · Vencimento: ${fmtDate(venc)}` : subTitulo}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           ${statusHtml}
@@ -5663,10 +5675,7 @@ function _portalRenderBoletos(inq) {
         </div>
       </div>
       <div class="portal-grid">
-        <div><span class="portal-label">Total</span><strong style="color:var(--gray-800)">${fmt(tot)}</strong></div>
-        <div><span class="portal-label">Pago</span><strong style="color:var(--success)">${fmt(rec)}</strong></div>
-        <div><span class="portal-label">Aluguel</span><span>${fmt(f.valorContrato)}</span></div>
-        <div><span class="portal-label">Água</span><span>${f.consumoAgua > 0 ? fmt(f.consumoAgua) : '—'}</span></div>
+        ${gridItens}
       </div>
     </div>`;
   }).join('');
