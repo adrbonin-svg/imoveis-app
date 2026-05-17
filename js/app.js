@@ -608,6 +608,7 @@ function renderPage(page) {
 
 // ── DASHBOARD ──────────────────────────────────────────
 function renderDashboard() {
+  _syncAllImoveisStatus(); // atualiza disponibilidade com base em contratos vencidos
   const total = DB.imoveis.length;
   const ocupados = DB.imoveis.filter(i => i.status === 'OCUPADO').length;
   const disponiveis = DB.imoveis.filter(i => i.status === 'DISPONÍVEL').length;
@@ -1445,11 +1446,21 @@ function saveInquilino() {
 
 function deleteInquilino(id) {
   if (!confirm_('Excluir este inquilino?')) return;
+  const inq = DB.inquilinos.find(x => x.id === id);
+  // Encerra contratos ATIVO vinculados a este inquilino
+  DB.contratos.forEach(c => {
+    if ((c.inquilinoId === id || (inq && c.inquilino === inq.nome)) && c.status === 'ATIVO') {
+      c.status = 'ENCERRADO';
+    }
+  });
   DB.inquilinos = DB.inquilinos.filter(x => x.id !== id);
   DB.usuarios   = DB.usuarios.filter(u => !(u.perfil === 'inquilino' && u.inquilinoId === id));
+  _syncAllImoveisStatus();
   saveData();
   renderInquilinos();
-  toast('Inquilino excluído');
+  renderImoveis();
+  renderContratos();
+  toast('Inquilino excluído e contratos encerrados');
 }
 
 // Cria ou recria o acesso do inquilino usando o CPF como login e senha
@@ -2007,13 +2018,33 @@ function deleteImovel(id) {
 // ── CONTRATOS ──────────────────────────────────────────
 let _contratoArquivoPendente = null; // { nome, tipo, dados } base64
 
-// Recalcula o status do imóvel com base nos contratos ATIVO existentes
+// Recalcula o status do imóvel com base nos contratos ATIVO dentro da vigência
 function _syncImovelStatus(nomeImovel) {
   if (!nomeImovel) return;
   const imo = DB.imoveis.find(i => i.nome === nomeImovel);
   if (!imo) return;
-  const temAtivo = DB.contratos.some(c => c.imovel === nomeImovel && c.status === 'ATIVO');
+  if (imo.status === 'EM MANUTENÇÃO') return; // não sobrescreve manutenção
+  const todayStr = today();
+  const temAtivo = DB.contratos.some(c =>
+    c.imovel === nomeImovel &&
+    c.status === 'ATIVO' &&
+    (!c.dataTermino || c.dataTermino >= todayStr)
+  );
   imo.status = temAtivo ? 'OCUPADO' : 'DISPONÍVEL';
+}
+
+// Sincroniza todos os imóveis — chamado no carregamento e no dashboard
+function _syncAllImoveisStatus() {
+  const todayStr = today();
+  DB.imoveis.forEach(imo => {
+    if (imo.status === 'EM MANUTENÇÃO') return;
+    const temAtivo = DB.contratos.some(c =>
+      c.imovel === imo.nome &&
+      c.status === 'ATIVO' &&
+      (!c.dataTermino || c.dataTermino >= todayStr)
+    );
+    imo.status = temAtivo ? 'OCUPADO' : 'DISPONÍVEL';
+  });
 }
 
 function preencherValoresImovel(sel) {
@@ -5797,6 +5828,7 @@ function _initApp() {
   });
   _pollWebhookEvents();
   setInterval(_pollWebhookEvents, 30000);
+  _syncAllImoveisStatus(); // sincroniza status na inicialização
   initAuth();
   _autoDetectAsaas();
 }
