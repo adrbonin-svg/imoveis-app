@@ -2745,7 +2745,11 @@ function renderFinanceiro() {
               ? `<span class="badge badge-red">${fmt((f.valorMulta||0)+(f.valorMora||0))}</span>`
               : '—'}</td>
         <td><strong>${fmt(f.totalGeral)}</strong></td>
-        <td><strong style="color:var(--success)">${fmt(f.valorRecebido)}</strong></td>
+        <td>
+          <strong style="color:var(--success)">${fmt(f.valorRecebido)}</strong>
+          ${f.formaPagamento ? `<div style="font-size:11px;color:var(--gray-500);margin-top:2px">💳 ${f.formaPagamento}</div>` : ''}
+          ${f.comprovante    ? `<button class="btn btn-ghost btn-sm" style="margin-top:4px;font-size:10px" onclick="verComprovante(${f.id})">🧾 Comprovante</button>` : ''}
+        </td>
         <td>${(() => {
           const rec = f.valorRecebido || 0;
           const tot = f.totalGeral    || 0;
@@ -2766,6 +2770,13 @@ function renderFinanceiro() {
         })()}</td>
         <td>
           <div class="actions">
+            ${(() => {
+              const rec = f.valorRecebido || 0;
+              const tot = f.totalGeral    || 0;
+              return (rec < tot && tot > 0 && _podeAcao('financeiro','editar'))
+                ? `<button class="btn btn-primary btn-sm" onclick="openBaixa(${f.id})">💰 Baixar</button>`
+                : '';
+            })()}
             ${_podeAcao('financeiro','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openFinanceiro(${f.id})">Editar</button>` : ''}
             ${_podeAcao('financeiro','excluir') ? `<button class="btn btn-danger btn-sm" onclick="deleteFinanceiro(${f.id})">Excluir</button>` : ''}
           </div>
@@ -2867,11 +2878,13 @@ function autoFillContratoValor() {
 }
 
 function openFinanceiro(id = null) {
+  _finComprovantePendente = null;
   const modal = document.getElementById('modal-financeiro');
   const form  = document.getElementById('form-financeiro');
   form.reset();
   delete form.valorRecebido.dataset.touched;
   form.dataset.id = id || '';
+  _renderFinComprovanteZone();
   document.getElementById('modal-fin-title').textContent = id ? 'Editar Pagamento' : 'Registrar Pagamento';
   form.contrato.innerHTML = '<option value="">Selecione...</option>' +
     DB.contratos.map(c => `<option value="${c.codigo}">${c.codigo} — ${c.imovel}</option>`).join('');
@@ -2899,9 +2912,12 @@ function openFinanceiro(id = null) {
     el('pctMora').value         = f.pctMora         || 0;
     el('valorRecebido').value   = f.valorRecebido;
     el('valorRecebido').dataset.touched = '1';
-    el('observacoes').value     = f.observacoes || '';
+    el('observacoes').value     = f.observacoes     || '';
+    el('dataBaixa').value       = f.dataBaixa       || '';
+    el('formaPagamento').value  = f.formaPagamento  || '';
     // restaura cor de atraso
     el('diasAtraso').classList.toggle('em-atraso', (f.diasAtraso || 0) > 0);
+    _renderFinComprovanteZone();
   }
   _aplicarEnergiaNoForm();
   calcFinanceiro();
@@ -2940,12 +2956,16 @@ function saveFinanceiro() {
     valorMora,
     totalGeral,
     valorRecebido:  num('valorRecebido'),
+    dataBaixa:      form.elements['dataBaixa']?.value      || '',
+    formaPagamento: form.elements['formaPagamento']?.value || '',
     observacoes:    form.observacoes.value.trim(),
     camposExtras:   coletarCamposExtras('financeiro', form),
   };
+  if (_finComprovantePendente) data.comprovante = _finComprovantePendente;
   if (!data.dataPagamento || !data.contrato) { toast('Data e contrato são obrigatórios', 'error'); return; }
   if (id) {
     const idx = DB.financeiro.findIndex(x => x.id === id);
+    if (!data.comprovante && DB.financeiro[idx].comprovante) data.comprovante = DB.financeiro[idx].comprovante;
     DB.financeiro[idx] = { ...DB.financeiro[idx], ...data };
   } else {
     DB.financeiro.push({ id: nextId(DB.financeiro), ...data });
@@ -2968,6 +2988,134 @@ function deleteFinanceiro(id) {
   saveData();
   renderFinanceiro();
   toast('Registro excluído');
+}
+
+// ── BAIXA MANUAL ───────────────────────────────────────
+let _baixaFinId = null;
+let _baixaComprovantePendente = null;
+let _finComprovantePendente   = null;
+
+function openBaixa(id) {
+  _baixaFinId = id;
+  _baixaComprovantePendente = null;
+  const f = DB.financeiro.find(x => x.id === id);
+  if (!f) return;
+  const form = document.getElementById('form-baixa');
+  form.reset();
+  document.getElementById('modal-baixa-info').innerHTML = `
+    <div><span style="color:var(--gray-400)">Contrato</span><br><strong>${f.contrato}</strong></div>
+    <div><span style="color:var(--gray-400)">Inquilino</span><br><strong>${f.inquilino || '—'}</strong></div>
+    <div><span style="color:var(--gray-400)">Total a receber</span><br><strong style="color:var(--primary)">${fmt(f.totalGeral)}</strong></div>
+    <div><span style="color:var(--gray-400)">Já recebido</span><br><strong style="color:var(--success)">${fmt(f.valorRecebido || 0)}</strong></div>`;
+  form.elements['dataBaixa'].value      = today();
+  form.elements['valorRecebido'].value  = (f.totalGeral || 0).toFixed(2);
+  if (f.formaPagamento) form.elements['formaPagamento'].value = f.formaPagamento;
+  if (f.dataBaixa)      form.elements['dataBaixa'].value      = f.dataBaixa;
+  _renderBaixaComprovante();
+  document.getElementById('modal-baixa').classList.add('open');
+}
+
+function _renderBaixaComprovante() {
+  const zone = document.getElementById('baixa-comprovante-zone');
+  if (!zone) return;
+  const f = _baixaFinId ? DB.financeiro.find(x => x.id === _baixaFinId) : null;
+  const comp = _baixaComprovantePendente || f?.comprovante;
+  if (comp) {
+    const isPdf = (comp.tipo || '').includes('pdf') || (comp.dados || '').startsWith('data:application/pdf');
+    zone.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--gray-50);border-radius:8px;width:100%">
+        <span style="font-size:18px">${isPdf ? '📄' : '🖼️'}</span>
+        <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${comp.nome}</span>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('baixa-file-input').click()">Trocar</button>
+        <button class="btn btn-danger btn-sm" onclick="_baixaComprovantePendente=null;_renderBaixaComprovante()">✕</button>
+      </div>`;
+  } else {
+    zone.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="document.getElementById('baixa-file-input').click()">📎 Anexar comprovante</button>`;
+  }
+}
+
+function handleBaixaFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { toast('Arquivo muito grande (máx 10 MB)', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    _baixaComprovantePendente = { nome: file.name, tipo: file.type, dados: e.target.result };
+    _renderBaixaComprovante();
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+function salvarBaixa() {
+  if (!_baixaFinId) return;
+  const form           = document.getElementById('form-baixa');
+  const dataBaixa      = form.elements['dataBaixa'].value;
+  const formaPagamento = form.elements['formaPagamento'].value;
+  const valorRecebido  = parseFloat(form.elements['valorRecebido'].value) || 0;
+  const obs            = form.elements['observacoesBaixa'].value.trim();
+  if (!dataBaixa)      { toast('Informe a data do pagamento',     'error'); return; }
+  if (!formaPagamento) { toast('Informe a forma de pagamento',    'error'); return; }
+  const idx = DB.financeiro.findIndex(x => x.id === _baixaFinId);
+  if (idx < 0) return;
+  const f = DB.financeiro[idx];
+  DB.financeiro[idx] = {
+    ...f,
+    valorRecebido,
+    dataBaixa,
+    formaPagamento,
+    observacoes:  obs || f.observacoes || '',
+    comprovante:  _baixaComprovantePendente || f.comprovante || null,
+  };
+  saveData();
+  closeModal('modal-baixa');
+  renderFinanceiro();
+  toast('Pagamento confirmado!', 'success');
+}
+
+function verComprovante(id) {
+  const f = DB.financeiro.find(x => x.id === id);
+  const comp = f?.comprovante;
+  if (!comp) return;
+  const isPdf = (comp.tipo || '').includes('pdf');
+  if (isPdf) {
+    const w = window.open();
+    w.document.write(`<iframe src="${comp.dados}" style="width:100%;height:100vh;border:none"></iframe>`);
+  } else {
+    const w = window.open();
+    w.document.write(`<img src="${comp.dados}" style="max-width:100%">`);
+  }
+}
+
+function handleFinComprovanteFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { toast('Arquivo muito grande (máx 10 MB)', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    _finComprovantePendente = { nome: file.name, tipo: file.type, dados: e.target.result };
+    _renderFinComprovanteZone();
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+function _renderFinComprovanteZone() {
+  const zone = document.getElementById('fin-comprovante-zone');
+  if (!zone) return;
+  const id   = parseInt(document.getElementById('form-financeiro')?.dataset.id) || null;
+  const f    = id ? DB.financeiro.find(x => x.id === id) : null;
+  const comp = _finComprovantePendente || f?.comprovante;
+  if (comp) {
+    const isPdf = (comp.tipo || '').includes('pdf');
+    zone.innerHTML = `
+      <span style="font-size:18px">${isPdf ? '📄' : '🖼️'}</span>
+      <span style="font-size:12px">${comp.nome}</span>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('fin-comprovante-input').click()">Trocar</button>
+      <button class="btn btn-danger btn-sm" onclick="_finComprovantePendente=null;_renderFinComprovanteZone()">✕</button>`;
+  } else {
+    zone.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="document.getElementById('fin-comprovante-input').click()">📎 Anexar</button>`;
+  }
 }
 
 // ── MANUTENÇÃO ─────────────────────────────────────────
