@@ -751,13 +751,12 @@ function renderDashboard() {
   document.getElementById('occ-disponiveis').textContent = disponiveis;
 
   // Contratos por vencer (30 dias) — com urgência
-  const em7  = new Date(); em7.setDate(em7.getDate() + 7);
-  const em30 = new Date(); em30.setDate(em30.getDate() + 30);
+  const em7Str  = (() => { const d = new Date(); d.setDate(d.getDate() + 7);  return d.toISOString().split('T')[0]; })();
+  const em30Str = (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0]; })();
   let vencendo = DB.contratos
     .filter(c => {
       if (!c.dataTermino || c.status !== 'ATIVO') return false;
-      const dt = new Date(c.dataTermino + 'T12:00:00');
-      return dt >= now && dt <= em30;
+      return c.dataTermino >= todayStr && c.dataTermino <= em30Str;
     });
   // sort padrão por data; override pelo _sortState se usuário clicou
   if (_sortState['dash-venc']) {
@@ -781,9 +780,8 @@ function renderDashboard() {
     tbodyVenc.innerHTML = `<tr><td colspan="6"><div class="empty"><p>Nenhum contrato vencendo nos próximos 30 dias ✓</p></div></td></tr>`;
   } else {
     tbodyVenc.innerHTML = vencendo.map(c => {
-      const dt = new Date(c.dataTermino + 'T12:00:00');
-      const dias = Math.ceil((dt - now) / 86400000);
-      const urgente = dt <= em7;
+      const dias = Math.ceil((new Date(c.dataTermino + 'T12:00:00') - new Date(todayStr + 'T12:00:00')) / 86400000);
+      const urgente = c.dataTermino <= em7Str;
       const badgeClass = urgente ? 'badge-red' : 'badge-yellow';
       const rowClass  = urgente ? 'tr-urgente' : 'tr-proximo';
       return `
