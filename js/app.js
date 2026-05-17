@@ -618,9 +618,13 @@ function renderDashboard() {
   const anoAtual = now.getFullYear();
   const todayStr = today();
 
-  // Receita recebida apenas no mês atual
+  // Mesma lógica da aba Financeira: pago = baixaManual OU asaas confirmado
+  const _finPago = f => f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
+
+  // Receita recebida no mês atual (só registros pagos do mês)
   const receitaRecebida = DB.financeiro
     .filter(f => {
+      if (!_finPago(f)) return false;
       const d = new Date((f.dataPagamento || '') + 'T12:00:00');
       return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual;
     })
@@ -629,28 +633,25 @@ function renderDashboard() {
   const manutPendente = DB.manutencao.filter(m => m.status !== 'Concluído').length;
   const pct = total > 0 ? Math.round((ocupados / total) * 100) : 0;
 
-  // Pagamentos vencidos: registros passados, sem pagamento, não caução, não confirmado no Asaas
+  // Pagamentos vencidos: mesma lógica da aba Financeira (PENDENTE + data passada)
   const pgtoVencidos = DB.financeiro.filter(f => {
     if (f.tipo === 'caucao') return false;
-    if ((f.valorRecebido || 0) > 0) return false;
-    if (['RECEIVED', 'CONFIRMED'].includes(f.asaasStatus)) return false;
+    if (_finPago(f)) return false;
+    if ((f.totalGeral || 0) <= 0) return false;
     return f.dataPagamento < todayStr;
   });
 
-  // Contratos ativos SEM nenhum registro financeiro (não caução) no mês atual
-  // e que também NÃO estão já cobertos pelos pgtoVencidos
-  const contratosComVencidoNomes = new Set(pgtoVencidos.map(f => f.contrato));
+  // Contratos ativos SEM registro financeiro pago no mês atual
+  // (excluindo os que já aparecem em pgtoVencidos para evitar duplicação)
+  const contratosJaNosVencidos = new Set(pgtoVencidos.map(f => f.contrato));
   const cobrancasPendentes = DB.contratos.filter(c => c.status === 'ATIVO').filter(c => {
-    // já aparece como vencido → não duplicar
-    if (contratosComVencidoNomes.has(c.codigo)) return false;
-    // verifica se tem registro pago no mês atual
-    const temPagoMes = DB.financeiro.some(f =>
+    if (contratosJaNosVencidos.has(c.codigo)) return false;
+    return !DB.financeiro.some(f =>
       f.contrato === c.codigo &&
       f.tipo !== 'caucao' &&
-      (f.valorRecebido > 0 || ['RECEIVED','CONFIRMED'].includes(f.asaasStatus)) &&
-      (() => { const d = new Date(f.dataPagamento + 'T12:00:00'); return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual; })()
+      _finPago(f) &&
+      (() => { const d = new Date((f.dataPagamento || '') + 'T12:00:00'); return d.getMonth() + 1 === mesAtual && d.getFullYear() === anoAtual; })()
     );
-    return !temPagoMes;
   });
 
   const totalAlertas = cobrancasPendentes.length + pgtoVencidos.length;
@@ -2363,6 +2364,7 @@ function saveContrato() {
   renderContratos();
   renderImoveis();
   renderFinanceiro();
+  renderDashboard();
   const _parcelaMsg = qtdParcelas > 0 ? ` ${qtdParcelas} parcela${qtdParcelas > 1 ? 's' : ''} gerada${qtdParcelas > 1 ? 's' : ''}.` : '';
   const _caucaoMsg  = qtdCaucao  > 0 ? ` ${qtdCaucao} entrada${qtdCaucao > 1 ? 's' : ''} de caução lançada${qtdCaucao > 1 ? 's' : ''}.` : '';
   toast((id ? 'Contrato atualizado!' : 'Contrato cadastrado!') + _parcelaMsg + _caucaoMsg, 'success');
@@ -3109,6 +3111,7 @@ function saveFinanceiro() {
   saveData();
   closeModal('modal-financeiro');
   renderFinanceiro();
+  renderDashboard();
   toast(id ? 'Pagamento atualizado!' : 'Pagamento registrado!', 'success');
 
   // Auto-geração de boleto (apenas novos registros)
@@ -3123,6 +3126,7 @@ function deleteFinanceiro(id) {
   DB.financeiro = DB.financeiro.filter(x => x.id !== id);
   saveData();
   renderFinanceiro();
+  renderDashboard();
   toast('Registro excluído');
 }
 
@@ -3207,6 +3211,7 @@ function salvarBaixa() {
   saveData();
   closeModal('modal-baixa');
   renderFinanceiro();
+  renderDashboard();
   toast('Pagamento confirmado!', 'success');
 }
 
@@ -4346,6 +4351,7 @@ async function gerarBoleto(finId) {
     };
     saveData();
     renderFinanceiro();
+    renderDashboard();
 
     // 6) Abre modal do boleto
     abrirModalBoleto(DB.financeiro[idx]);
@@ -4431,7 +4437,7 @@ async function cancelarBoleto(finId) {
   if (res.ok || res.deleted) {
     const idx = DB.financeiro.findIndex(x => x.id === finId);
     DB.financeiro[idx].asaasStatus = 'CANCELED';
-    saveData(); renderFinanceiro();
+    saveData(); renderFinanceiro(); renderDashboard();
     toast('Boleto cancelado', 'success');
   } else {
     toast('Erro ao cancelar boleto', 'error');
