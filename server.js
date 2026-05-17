@@ -52,6 +52,27 @@ function writeEnvFile(vars) {
   fs.writeFileSync(ENV_FILE, content, 'utf8');
 }
 
+// ── Banco de dados do app (persistência server-side) ───
+const DB_FILE = path.join(__dirname, 'db.json');
+
+app.get('/api/db', (req, res) => {
+  try {
+    const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    res.json(data);
+  } catch {
+    res.status(404).json({ error: 'Sem dados salvos' });
+  }
+});
+
+app.post('/api/db', (req, res) => {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(req.body), 'utf8');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Webhook events ──────────────────────────────────────
 const EVENTS_FILE = path.join(__dirname, 'webhook-events.json');
 

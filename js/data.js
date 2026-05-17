@@ -55,9 +55,9 @@ const DB = {
   ],
 
   financeiro: [
-    { id: 1, dataPagamento: "2026-01-01", contrato: "CT002", inquilino: "Adilson José (Pousada)", valorContrato: 550.00, multa: 5.00, despesas: 5.00, valorRecebido: 550.00, observacoes: "" },
-    { id: 2, dataPagamento: "2026-02-01", contrato: "CT001", inquilino: "Adilson José (Pousada)", valorContrato: 550.00, multa: 5.00, despesas: 20.00, valorRecebido: 535.00, observacoes: "" },
-    { id: 3, dataPagamento: "2026-02-01", contrato: "CT003", inquilino: "", valorContrato: 650.00, multa: 20.00, despesas: 0, valorRecebido: 670.00, observacoes: "" },
+    { id: 1, dataPagamento: "2026-01-01", contrato: "CT002", inquilino: "Adilson José (Pousada)", valorContrato: 550.00, totalGeral: 550.00, valorRecebido: 550.00, baixaManual: true, observacoes: "" },
+    { id: 2, dataPagamento: "2026-02-01", contrato: "CT001", inquilino: "Adilson José (Pousada)", valorContrato: 550.00, totalGeral: 550.00, valorRecebido: 535.00, baixaManual: true, observacoes: "" },
+    { id: 3, dataPagamento: "2026-02-01", contrato: "CT003", inquilino: "", valorContrato: 650.00, totalGeral: 650.00, valorRecebido: 670.00, baixaManual: true, observacoes: "" },
   ],
 
   manutencao: [
@@ -321,9 +321,14 @@ CPF:`,
   }
 };
 
-// Persistência no localStorage
+// Persistência no localStorage + backup no servidor
 function saveData() {
   localStorage.setItem('imoveis_db', JSON.stringify(DB));
+  fetch('/api/db', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(DB),
+  }).catch(() => {});
 }
 
 function loadData() {
@@ -371,6 +376,24 @@ function loadData() {
         }
       });
       if (migrated) saveData();
+    }
+
+    // Migração: calcula totalGeral para registros financeiros sem ele
+    // e marca baixaManual em registros que já tinham valorRecebido confirmado
+    if (Array.isArray(DB.financeiro)) {
+      let finMigrated = false;
+      DB.financeiro.forEach(f => {
+        if (f.totalGeral == null) {
+          f.totalGeral = (f.valorContrato||0) + (f.consumoAgua||0) + (f.taxaManutencao||0)
+                       + (f.taxasExtras||0) + (f.totalEnergia||0) + (f.valorMulta||0) + (f.valorMora||0);
+          finMigrated = true;
+        }
+        if (f.baixaManual == null && (f.valorRecebido || 0) > 0) {
+          f.baixaManual = true;
+          finMigrated = true;
+        }
+      });
+      if (finMigrated) saveData();
     }
   }
 }

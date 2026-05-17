@@ -2096,10 +2096,29 @@
 <!-- TOAST -->
 <div id="toast" class="toast"></div>
 
-<script src="js/data.js?v=6"></script>
-<script src="js/app.js?v=6"></script>
 <script>
-  document.getElementById('topbar-date').textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+(async function () {
+  if (!localStorage.getItem('imoveis_db')) {
+    try {
+      const r = await fetch('/api/db');
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.financeiro) localStorage.setItem('imoveis_db', JSON.stringify(d));
+      }
+    } catch (e) {}
+  }
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.body.appendChild(s);
+    });
+  }
+  await loadScript('js/data.js?v=7');
+  await loadScript('js/app.js?v=7');
+  const el = document.getElementById('topbar-date');
+  if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+})();
 </script>
 </body>
 </html>

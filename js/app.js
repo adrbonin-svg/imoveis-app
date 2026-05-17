@@ -978,10 +978,10 @@ function _aplicarSort(list, page) {
   if (!s) return list;
   return [...list].sort((a, b) => {
     let va = s.col === '_encargos' ? (a.valorMulta||0)+(a.valorMora||0)
-           : s.col === '_statusPag' ? ((a.valorRecebido||0) >= (a.totalGeral||0) ? 'PAGO' : (a.valorRecebido||0) > 0 ? 'PARCIAL' : 'PENDENTE')
+           : s.col === '_statusPag' ? (a.baixaManual && (a.valorRecebido||0) >= (a.totalGeral||0) ? 'PAGO' : a.baixaManual ? 'PARCIAL' : 'PENDENTE')
            : a[s.col] ?? '';
     let vb = s.col === '_encargos' ? (b.valorMulta||0)+(b.valorMora||0)
-           : s.col === '_statusPag' ? ((b.valorRecebido||0) >= (b.totalGeral||0) ? 'PAGO' : (b.valorRecebido||0) > 0 ? 'PARCIAL' : 'PENDENTE')
+           : s.col === '_statusPag' ? (b.baixaManual && (b.valorRecebido||0) >= (b.totalGeral||0) ? 'PAGO' : b.baixaManual ? 'PARCIAL' : 'PENDENTE')
            : b[s.col] ?? '';
     const na = parseFloat(va), nb = parseFloat(vb);
     if (!isNaN(na) && !isNaN(nb)) return s.dir === 'asc' ? na - nb : nb - na;
@@ -2682,9 +2682,9 @@ function renderFinanceiro() {
     list = list.filter(f => {
       const rec = f.valorRecebido || 0;
       const tot = f.totalGeral    || 0;
-      if (statusPagFilter === 'PENDENTE') return rec <= 0 && tot > 0;
-      if (statusPagFilter === 'PAGO')     return rec >= tot && tot > 0;
-      if (statusPagFilter === 'PARCIAL')  return rec > 0 && rec < tot;
+      if (statusPagFilter === 'PENDENTE') return !f.baixaManual && !(f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && tot > 0;
+      if (statusPagFilter === 'PAGO')     return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && rec >= tot && tot > 0;
+      if (statusPagFilter === 'PARCIAL')  return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && rec > 0 && rec < tot;
       return true;
     });
   }
@@ -2753,9 +2753,10 @@ function renderFinanceiro() {
         <td>${(() => {
           const rec = f.valorRecebido || 0;
           const tot = f.totalGeral    || 0;
-          if (rec <= 0 && tot > 0)  return '<span class="badge badge-red">PENDENTE</span>';
-          if (rec >= tot && tot > 0) return '<span class="badge badge-green">PAGO</span>';
-          if (rec > 0 && rec < tot)  return '<span class="badge badge-yellow">PARCIAL</span>';
+          const pago = f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
+          if (pago && rec >= tot && tot > 0)  return '<span class="badge badge-green">PAGO</span>';
+          if (pago && rec > 0 && rec < tot)   return '<span class="badge badge-yellow">PARCIAL</span>';
+          if (!pago && tot > 0)               return '<span class="badge badge-red">PENDENTE</span>';
           return '—';
         })()}</td>
         <td>${(() => {
@@ -2771,9 +2772,9 @@ function renderFinanceiro() {
         <td>
           <div class="actions">
             ${(() => {
-              const rec = f.valorRecebido || 0;
-              const tot = f.totalGeral    || 0;
-              return (rec < tot && tot > 0 && _podeAcao('financeiro','editar'))
+              const tot  = f.totalGeral || 0;
+              const pago = f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
+              return (!pago && tot > 0 && _podeAcao('financeiro','editar'))
                 ? `<button class="btn btn-primary btn-sm" onclick="openBaixa(${f.id})">💰 Baixar</button>`
                 : '';
             })()}
@@ -2955,7 +2956,6 @@ function saveFinanceiro() {
     pctMora:        num('pctMora'),
     valorMora,
     totalGeral,
-    valorRecebido:  num('valorRecebido'),
     dataBaixa:      form.elements['dataBaixa']?.value      || '',
     formaPagamento: form.elements['formaPagamento']?.value || '',
     observacoes:    form.observacoes.value.trim(),
@@ -3066,6 +3066,7 @@ function salvarBaixa() {
     formaPagamento,
     observacoes:  obs || f.observacoes || '',
     comprovante:  _baixaComprovantePendente || f.comprovante || null,
+    baixaManual:  true,
   };
   saveData();
   closeModal('modal-baixa');
