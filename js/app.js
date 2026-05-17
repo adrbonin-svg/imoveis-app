@@ -5697,7 +5697,7 @@ function _portalRenderContratos(inq) {
 function _portalRenderBoletos(inq) {
   const el = document.getElementById('portal-bl-lista');
   if (!el) return;
-  const hoje = new Date().toISOString().slice(0,10);
+  const hoje = today();
   const financ = DB.financeiro
     .filter(f => (f.inquilino || '').toLowerCase() === inq.nome.toLowerCase())
     .sort((a,b) => (b.dataPagamento||'').localeCompare(a.dataPagamento||''));
@@ -5767,6 +5767,10 @@ function _portalRenderBoletos(inq) {
       `<div><span class="portal-label">${x.label}</span><span>${fmt(x.val)}</span></div>`
     ).join('');
 
+    const obsHtml = f.observacoes
+      ? `<div style="margin-top:10px;padding:10px 12px;background:#f0f6ff;border-left:3px solid var(--primary);border-radius:6px;font-size:12px;color:#444;white-space:pre-line;line-height:1.6">${f.observacoes}</div>`
+      : '';
+
     return `
     <div class="portal-card ${atrasado && rec < tot ? 'portal-card-atrasado' : ''}">
       <div class="portal-card-head">
@@ -5781,6 +5785,7 @@ function _portalRenderBoletos(inq) {
         <div><span class="portal-label">Pago</span><strong style="color:var(--success)">${fmt(rec)}</strong></div>
         ${linhasDetalhe}
       </div>
+      ${obsHtml}
     </div>`;
   }).join('');
 }
