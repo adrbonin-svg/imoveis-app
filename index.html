@@ -1,0 +1,1961 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Gestão de Imóveis</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+
+<!-- ══ LOGIN OVERLAY ══ -->
+<script>
+  // Mostra overlay imediatamente se não há sessão ativa (evita flash do app)
+  if (!sessionStorage.getItem('imoveis_uid')) {
+    document.documentElement.style.setProperty('--show-login','1');
+  }
+</script>
+<div id="login-overlay" class="login-overlay hidden">
+  <div class="login-card">
+    <div class="login-logo">🏢</div>
+    <h2>Gestão de Imóveis</h2>
+    <p>Faça login para continuar</p>
+    <form onsubmit="event.preventDefault(); doLogin()">
+      <div class="form-group">
+        <label>Usuário</label>
+        <input id="login-usuario" type="text" autocomplete="username" placeholder="seu usuário" required>
+      </div>
+      <div class="form-group">
+        <label>Senha</label>
+        <input id="login-senha" type="password" autocomplete="current-password" placeholder="••••••••" required>
+      </div>
+      <div class="login-error" id="login-error"></div>
+      <button type="submit" class="btn btn-primary login-btn">Entrar</button>
+    </form>
+  </div>
+</div>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="icon">🏢</div>
+    <div>
+      <h1>Gestão de Imóveis</h1>
+      <p>Painel administrativo</p>
+    </div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-item" data-page="dashboard"><span class="nav-icon">📊</span> Dashboard</div>
+    <div class="nav-item" data-page="imoveis"><span class="nav-icon">🏠</span> Imóveis</div>
+    <div class="nav-item" data-page="inquilinos"><span class="nav-icon">👥</span> Inquilinos</div>
+    <div class="nav-item" data-page="contratos"><span class="nav-icon">📄</span> Contratos</div>
+    <div class="nav-item" data-page="financeiro"><span class="nav-icon">💰</span> Financeiro</div>
+    <div class="nav-item" data-page="manutencao"><span class="nav-icon">🔧</span> Manutenção</div>
+    <div class="nav-item" data-page="relatorios"><span class="nav-icon">📊</span> Relatórios</div>
+    <div class="nav-item" data-page="config"><span class="nav-icon">⚙️</span> Configurações</div>
+    <div class="nav-item" data-page="usuarios" id="nav-usuarios" style="display:none"><span class="nav-icon">👤</span> Usuários</div>
+  </nav>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+  <div class="topbar">
+    <div>
+      <h2 id="topbar-title">Dashboard</h2>
+      <span class="topbar-sub" id="topbar-date"></span>
+    </div>
+    <div class="topbar-user" id="topbar-user-btn" onclick="toggleUserDropdown()">
+      <div class="topbar-user-avatar" id="topbar-user-avatar">A</div>
+      <div>
+        <div class="topbar-user-name" id="topbar-user-name">Administrador</div>
+        <div class="topbar-user-role" id="topbar-user-role">Administrador</div>
+      </div>
+      <span style="font-size:11px;color:var(--gray-400)">▾</span>
+      <div class="topbar-user-dropdown" id="topbar-user-dropdown">
+        <a onclick="openAlterarSenha()">🔑 Alterar Senha</a>
+        <hr class="topbar-user-dd-divider">
+        <a class="danger" onclick="logout()">🚪 Sair</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ══ DASHBOARD ══ -->
+    <div id="page-dashboard" class="page">
+      <div class="cards-grid">
+        <div class="card">
+          <div class="card-icon blue">🏠</div>
+          <div class="card-label">Total de Imóveis</div>
+          <div class="card-value" id="dash-total-imoveis">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon green">✅</div>
+          <div class="card-label">Ocupados</div>
+          <div class="card-value" id="dash-ocupados">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon yellow">🔓</div>
+          <div class="card-label">Disponíveis</div>
+          <div class="card-value" id="dash-disponiveis">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon blue">📄</div>
+          <div class="card-label">Contratos Ativos</div>
+          <div class="card-value" id="dash-contratos">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon green">💵</div>
+          <div class="card-label">Receita Mensal Prevista</div>
+          <div class="card-value" style="font-size:18px" id="dash-receita">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon purple">💳</div>
+          <div class="card-label">Total Recebido</div>
+          <div class="card-value" style="font-size:18px" id="dash-recebido">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon red">🔧</div>
+          <div class="card-label">Manut. Pendentes</div>
+          <div class="card-value" id="dash-manut">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon orange">🔄</div>
+          <div class="card-label">Preventivas c/ Alerta</div>
+          <div class="card-value" id="dash-prev-alertas">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon red">🔔</div>
+          <div class="card-label">Cobranças Pendentes</div>
+          <div class="card-value" id="dash-cobrancas">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon orange">📝</div>
+          <div class="card-label">Vistorias Sem Assinatura</div>
+          <div class="card-value" id="dash-vist-assinar">—</div>
+        </div>
+      </div>
+
+      <!-- BARRA DE ÍNDICES DE INFLAÇÃO -->
+      <div class="indices-bar" id="indices-bar">
+        <div class="indices-header">
+          <span class="indices-title">📊 Índices de Inflação — Acumulado 12 Meses</span>
+          <span class="indices-atualizado" id="indices-atualizado">Carregando...</span>
+          <button class="btn btn-ghost btn-sm" onclick="_indicesCache=null;renderIndicesBar()" title="Atualizar índices">↻ Atualizar</button>
+        </div>
+        <div class="indices-grid" id="indices-grid">
+          <div class="indice-loading">⏳ Consultando API do Banco Central do Brasil...</div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3>Taxa de Ocupação</h3>
+          <div class="occ-chart">
+            <div class="occ-ring" id="occ-ring">
+              <span id="occ-pct">0%</span>
+            </div>
+            <div class="occ-legend">
+              <p><span class="dot dot-green"></span> Ocupados: <strong id="occ-ocupados">0</strong></p>
+              <p><span class="dot dot-gray"></span> Disponíveis: <strong id="occ-disponiveis">0</strong></p>
+            </div>
+          </div>
+        </div>
+        <div class="chart-card chart-card-alerta">
+          <h3>⚠️ Contratos Vencendo em 30 Dias</h3>
+          <div class="table-wrapper" style="box-shadow:none">
+            <table>
+              <thead id="dash-venc-thead"><tr><th>Código</th><th>Imóvel</th><th>Inquilino</th><th>Vencimento</th><th>Restam</th><th>Renovar</th></tr></thead>
+              <tbody id="dash-vencendo"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- SUGESTÃO DE REAJUSTE (populado via JS quando há contratos vencendo) -->
+      <div id="dash-reajuste-section" class="dash-reajuste-wrapper" style="display:none"></div>
+
+      <!-- COBRANÇAS PENDENTES DO MÊS -->
+      <div class="table-wrapper dash-alerta-box" style="margin-bottom:20px">
+        <div class="table-header">
+          <h3 class="dash-alerta-titulo">🔴 Cobranças Pendentes / Pagamentos em Atraso</h3>
+          <span class="dash-alerta-sub">Contratos ativos sem pagamento no mês atual</span>
+        </div>
+        <table>
+          <thead id="dash-cobr-thead"><tr><th>Contrato</th><th>Imóvel</th><th>Inquilino</th><th>Valor</th><th>Período</th><th>Situação</th><th></th></tr></thead>
+          <tbody id="dash-cobrancas-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- VISTORIAS AGUARDANDO ASSINATURA -->
+      <div class="table-wrapper dash-alerta-box" id="dash-vist-assinar-section" style="margin-bottom:20px;display:none">
+        <div class="table-header">
+          <h3 class="dash-alerta-titulo">📝 Vistorias Aguardando Assinatura do Inquilino</h3>
+          <span class="dash-alerta-sub">Checklists vinculados mas ainda não confirmados pelo inquilino</span>
+        </div>
+        <table>
+          <thead id="dash-vist-thead"><tr><th>Inquilino</th><th>Imóvel</th><th>Tipo de Vistoria</th><th>Data Vinculação</th><th>Situação</th><th></th></tr></thead>
+          <tbody id="dash-vist-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- ALERTAS DE MANUTENÇÃO PREVENTIVA -->
+      <div class="table-wrapper dash-alerta-box" id="dash-prev-section" style="margin-bottom:20px;display:none">
+        <div class="table-header">
+          <h3 class="dash-alerta-titulo">🔄 Manutenções Preventivas com Alerta</h3>
+          <span class="dash-alerta-sub">Serviços vencidos ou próximos do prazo</span>
+        </div>
+        <table>
+          <thead id="dash-prev-thead"><tr><th>Imóvel</th><th>Serviço</th><th>Periodicidade</th><th>Próxima Exec.</th><th>Situação</th><th></th></tr></thead>
+          <tbody id="dash-prev-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- DOIS PAINÉIS: ÚLTIMOS PAGAMENTOS -->
+      <div class="table-wrapper">
+        <div class="table-header"><h3>Últimos Pagamentos Recebidos</h3></div>
+        <table>
+          <thead id="dash-pgto-thead"><tr><th>Data</th><th>Contrato</th><th>Inquilino</th><th>Valor Recebido</th></tr></thead>
+          <tbody id="dash-ultimos-pgtos"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ IMÓVEIS ══ -->
+    <div id="page-imoveis" class="page">
+      <div class="table-wrapper">
+        <div class="table-header">
+          <h3>Imóveis Cadastrados</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="search-box" id="imo-search" placeholder="Buscar imóvel..." oninput="renderImoveis()">
+            <button class="btn btn-primary" id="btn-criar-imoveis" onclick="openImovel()">+ Novo Imóvel</button>
+          </div>
+        </div>
+        <div class="filter-bar" id="imo-filter-bar">
+          <span class="filter-bar-label">Filtrar:</span>
+          <button class="filter-pill active" data-filter="todos"         onclick="setFilterPill('imo-filter-bar','todos',renderImoveis)">Todos</button>
+          <button class="filter-pill"        data-filter="DISPONÍVEL"    onclick="setFilterPill('imo-filter-bar','DISPONÍVEL',renderImoveis)">Disponível</button>
+          <button class="filter-pill"        data-filter="OCUPADO"       onclick="setFilterPill('imo-filter-bar','OCUPADO',renderImoveis)">Ocupado</button>
+          <button class="filter-pill"        data-filter="EM MANUTENÇÃO" onclick="setFilterPill('imo-filter-bar','EM MANUTENÇÃO',renderImoveis)">Em Manutenção</button>
+        </div>
+        <table>
+          <thead id="imo-thead">
+            <tr><th>Imóvel</th><th>Localização</th><th>Aluguel</th><th>Status</th><th>Fotos</th><th>Ações</th></tr>
+          </thead>
+          <tbody id="imo-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ INQUILINOS ══ -->
+    <div id="page-inquilinos" class="page">
+      <div class="table-wrapper">
+        <div class="table-header">
+          <h3>Inquilinos Cadastrados</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="search-box" id="inq-search" placeholder="Buscar inquilino..." oninput="renderInquilinos()">
+            <button class="btn btn-primary" id="btn-criar-inquilinos" onclick="openInquilino()">+ Novo Inquilino</button>
+          </div>
+        </div>
+        <div id="inq-ck-alerta" style="display:none;margin-bottom:10px"></div>
+        <div class="filter-bar" id="inq-filter-bar">
+          <span class="filter-bar-label">Filtrar:</span>
+          <button class="filter-pill active" data-filter="todos"          onclick="setFilterPill('inq-filter-bar','todos',renderInquilinos)">Todos</button>
+          <button class="filter-pill"        data-filter="com-ativo"       onclick="setFilterPill('inq-filter-bar','com-ativo',renderInquilinos)">Com contrato ativo</button>
+          <button class="filter-pill"        data-filter="sem-ativo"       onclick="setFilterPill('inq-filter-bar','sem-ativo',renderInquilinos)">Sem contrato ativo</button>
+          <button class="filter-pill filter-pill-warn" data-filter="sem-vistoria" onclick="setFilterPill('inq-filter-bar','sem-vistoria',renderInquilinos)">⚠️ Sem vistoria</button>
+          <button class="filter-pill" style="border-color:#fdba74;color:#c2410c" data-filter="sem-assinatura" onclick="setFilterPill('inq-filter-bar','sem-assinatura',renderInquilinos)">📝 Aguard. assinatura</button>
+        </div>
+        <table>
+          <thead id="inq-thead">
+            <tr><th>Inquilino</th><th>Celular</th><th>E-mail</th><th>Contratos</th><th>Documentos</th><th>Vistoria</th><th>Ações</th></tr>
+          </thead>
+          <tbody id="inq-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ CONTRATOS ══ -->
+    <div id="page-contratos" class="page">
+
+      <!-- TABS -->
+      <div class="tabs" id="ct-tabs">
+        <div class="tab active" onclick="showCtTab('lista')">📋 Contratos</div>
+        <div class="tab" onclick="showCtTab('modelo')">📝 Modelo do Contrato</div>
+      </div>
+
+      <!-- TAB: LISTA -->
+      <div id="ct-tab-lista">
+        <div class="table-wrapper">
+          <div class="table-header">
+            <h3>Contratos</h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input class="search-box" id="ct-search" placeholder="Buscar contrato..." oninput="renderContratos()">
+              <button class="btn btn-primary" id="btn-criar-contratos" onclick="openContrato()">+ Novo Contrato</button>
+            </div>
+          </div>
+          <div class="filter-bar" id="ct-filter-bar">
+            <span class="filter-bar-label">Filtrar:</span>
+            <button class="filter-pill active" data-filter="todos"     onclick="setFilterPill('ct-filter-bar','todos',renderContratos)">Todos</button>
+            <button class="filter-pill"        data-filter="ATIVO"     onclick="setFilterPill('ct-filter-bar','ATIVO',renderContratos)">Ativo</button>
+            <button class="filter-pill"        data-filter="ENCERRADO" onclick="setFilterPill('ct-filter-bar','ENCERRADO',renderContratos)">Encerrado</button>
+            <button class="filter-pill"        data-filter="SUSPENSO"  onclick="setFilterPill('ct-filter-bar','SUSPENSO',renderContratos)">Suspenso</button>
+          </div>
+          <table>
+            <thead id="ct-thead">
+              <tr><th>Código</th><th>Imóvel</th><th>Inquilino</th><th>Início</th><th>Término</th><th>Valor Mensal</th><th>Status</th><th>Arquivo</th><th>Ações</th></tr>
+            </thead>
+            <tbody id="ct-tbody"></tbody>
+          </table>
+          <input type="file" id="inline-file-input" accept=".pdf,image/*" style="display:none" onchange="handleInlineUpload(this)">
+        </div>
+      </div>
+
+      <!-- TAB: MODELO DO CONTRATO -->
+      <div id="ct-tab-modelo" style="display:none">
+        <div class="modelo-layout">
+          <!-- EDITOR -->
+          <div class="modelo-editor-wrap">
+            <div class="table-wrapper" style="height:100%">
+              <div class="table-header">
+                <h3>Texto do Modelo</h3>
+                <div style="display:flex;gap:8px">
+                  <button class="btn btn-ghost btn-sm" onclick="resetModeloContrato()">↺ Restaurar padrão</button>
+                  <button class="btn btn-primary btn-sm" onclick="saveModeloContrato()">💾 Salvar Modelo</button>
+                </div>
+              </div>
+              <div style="padding:16px">
+                <p style="font-size:12px;color:var(--gray-400);margin-bottom:8px">
+                  Use os campos automáticos ao lado clicando neles para inserir no cursor. O texto entre {{ }} será substituído automaticamente ao gerar o contrato.
+                </p>
+                <textarea id="modelo-textarea" class="modelo-textarea" spellcheck="false"></textarea>
+              </div>
+            </div>
+          </div>
+          <!-- PAINEL DE CAMPOS -->
+          <div class="modelo-campos-wrap">
+            <div class="table-wrapper">
+              <div class="table-header"><h3>Campos Automáticos</h3></div>
+              <div style="padding:12px 16px" id="modelo-campos-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══ FINANCEIRO ══ -->
+    <div id="page-financeiro" class="page">
+
+      <!-- BARRA DE PERÍODO -->
+      <div class="periodo-bar">
+        <button class="btn btn-ghost btn-sm periodo-nav" onclick="finNavMes(-1)" title="Mês anterior">&#8592;</button>
+        <div class="periodo-selectors">
+          <select id="fin-sel-mes" onchange="renderFinanceiro()">
+            <option value="1">Janeiro</option><option value="2">Fevereiro</option>
+            <option value="3">Março</option><option value="4">Abril</option>
+            <option value="5">Maio</option><option value="6">Junho</option>
+            <option value="7">Julho</option><option value="8">Agosto</option>
+            <option value="9">Setembro</option><option value="10">Outubro</option>
+            <option value="11">Novembro</option><option value="12">Dezembro</option>
+          </select>
+          <select id="fin-sel-ano" onchange="renderFinanceiro()"></select>
+        </div>
+        <button class="btn btn-ghost btn-sm periodo-nav" onclick="finNavMes(1)" title="Próximo mês">&#8594;</button>
+        <div class="periodo-divider"></div>
+        <button class="btn btn-ghost btn-sm" id="fin-btn-todos" onclick="finToggleTodos()">Todos os períodos</button>
+        <span class="periodo-label" id="fin-periodo-label"></span>
+      </div>
+
+      <!-- CARDS DO PERÍODO -->
+      <div class="cards-grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));margin-bottom:16px">
+        <div class="card">
+          <div class="card-icon blue">🧾</div>
+          <div class="card-label">Total Cobrado</div>
+          <div class="card-value" style="font-size:17px" id="fin-total-geral">—</div>
+          <div class="card-sub" id="fin-periodo-label-card"></div>
+        </div>
+        <div class="card">
+          <div class="card-icon green">💰</div>
+          <div class="card-label">Total Recebido</div>
+          <div class="card-value" style="font-size:17px" id="fin-total-recebido">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon" id="fin-saldo-icon" style="background:#fef3c7">⚖️</div>
+          <div class="card-label">Saldo do Período</div>
+          <div class="card-value" style="font-size:17px" id="fin-saldo">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon yellow">📋</div>
+          <div class="card-label">Registros</div>
+          <div class="card-value" id="fin-qtd">—</div>
+        </div>
+      </div>
+
+      <!-- TABELA -->
+      <div class="table-wrapper">
+        <div class="table-header">
+          <h3>Controle de Pagamentos</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="search-box" id="fin-search" placeholder="Buscar contrato / inquilino..." oninput="renderFinanceiro()">
+            <button class="btn btn-primary" id="btn-criar-financeiro" onclick="openFinanceiro()">+ Registrar Pagamento</button>
+          </div>
+        </div>
+        <div class="filter-bar" id="fin-filter-bar">
+          <span class="filter-bar-label">Filtrar:</span>
+          <button class="filter-pill active" data-filter="todos"    onclick="setFilterPill('fin-filter-bar','todos',renderFinanceiro)">Todos</button>
+          <button class="filter-pill"        data-filter="PENDENTE" onclick="setFilterPill('fin-filter-bar','PENDENTE',renderFinanceiro)">Pendente</button>
+          <button class="filter-pill"        data-filter="PARCIAL"  onclick="setFilterPill('fin-filter-bar','PARCIAL',renderFinanceiro)">Parcial</button>
+          <button class="filter-pill"        data-filter="PAGO"     onclick="setFilterPill('fin-filter-bar','PAGO',renderFinanceiro)">Pago</button>
+        </div>
+        <table>
+          <thead id="fin-thead">
+            <tr><th>Vencimento</th><th>Contrato</th><th>Inquilino</th><th>Vlr Contrato</th><th>Água</th><th>Energia</th><th>Encargos</th><th>Total</th><th>Recebido</th><th>Status</th><th>Boleto</th><th>Ações</th></tr>
+          </thead>
+          <tbody id="fin-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ MANUTENÇÃO ══ -->
+    <div id="page-manutencao" class="page">
+
+      <!-- BARRA DE PERÍODO -->
+      <div class="periodo-bar">
+        <button class="btn btn-ghost btn-sm periodo-nav" onclick="manNavMes(-1)" title="Mês anterior">&#8592;</button>
+        <div class="periodo-selectors">
+          <select id="man-sel-mes" onchange="renderManutencao()">
+            <option value="1">Janeiro</option><option value="2">Fevereiro</option>
+            <option value="3">Março</option><option value="4">Abril</option>
+            <option value="5">Maio</option><option value="6">Junho</option>
+            <option value="7">Julho</option><option value="8">Agosto</option>
+            <option value="9">Setembro</option><option value="10">Outubro</option>
+            <option value="11">Novembro</option><option value="12">Dezembro</option>
+          </select>
+          <select id="man-sel-ano" onchange="renderManutencao()"></select>
+        </div>
+        <button class="btn btn-ghost btn-sm periodo-nav" onclick="manNavMes(1)" title="Próximo mês">&#8594;</button>
+        <div class="periodo-divider"></div>
+        <button class="btn btn-ghost btn-sm" id="man-btn-todos" onclick="manToggleTodos()">Todos os períodos</button>
+        <span class="periodo-label" id="man-periodo-label"></span>
+      </div>
+
+      <!-- CARDS DO PERÍODO -->
+      <div class="cards-grid" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr));margin-bottom:16px">
+        <div class="card">
+          <div class="card-icon red">💸</div>
+          <div class="card-label">Total Gasto</div>
+          <div class="card-value" style="font-size:17px" id="man-total-gasto">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon blue">🔧</div>
+          <div class="card-label">Total Registros</div>
+          <div class="card-value" id="man-qtd-total">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon green">✅</div>
+          <div class="card-label">Concluídos</div>
+          <div class="card-value" id="man-qtd-concluido">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon yellow">⏳</div>
+          <div class="card-label">Em Andamento / Pend.</div>
+          <div class="card-value" id="man-qtd-andamento">—</div>
+        </div>
+      </div>
+
+      <!-- TABELA -->
+      <div class="table-wrapper">
+        <div class="table-header">
+          <h3>Manutenções</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="search-box" id="man-search" placeholder="Buscar manutenção..." oninput="renderManutencao()">
+            <button class="btn btn-primary" id="btn-criar-manutencao" onclick="openManutencao()">+ Nova Manutenção</button>
+          </div>
+        </div>
+        <div class="filter-bar" id="man-filter-bar">
+          <span class="filter-bar-label">Filtrar:</span>
+          <button class="filter-pill active" data-filter="todos"       onclick="setFilterPill('man-filter-bar','todos',renderManutencao)">Todos</button>
+          <button class="filter-pill"        data-filter="Pendente"    onclick="setFilterPill('man-filter-bar','Pendente',renderManutencao)">Pendente</button>
+          <button class="filter-pill"        data-filter="Em andamento" onclick="setFilterPill('man-filter-bar','Em andamento',renderManutencao)">Em andamento</button>
+          <button class="filter-pill"        data-filter="Concluído"   onclick="setFilterPill('man-filter-bar','Concluído',renderManutencao)">Concluído</button>
+        </div>
+        <table>
+          <thead id="man-thead">
+            <tr><th>Imóvel</th><th>Tipo de Serviço</th><th>Prestador</th><th>Data</th><th>Custo</th><th>Status</th><th>Docs</th><th>Observações</th><th>Ações</th></tr>
+          </thead>
+          <tbody id="man-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- MANUTENÇÃO PREVENTIVA -->
+      <div class="table-wrapper" style="margin-top:20px">
+        <div class="table-header">
+          <h3>🔄 Manutenção Preventiva</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="search-box" id="mprev-search" placeholder="Buscar preventiva..." oninput="renderManutencaoPreventiva()">
+            <button class="btn btn-primary" onclick="openManutencaoPreventiva()">+ Nova Preventiva</button>
+          </div>
+        </div>
+        <div class="filter-bar" id="mprev-filter-bar">
+          <span class="filter-bar-label">Filtrar:</span>
+          <button class="filter-pill active" data-filter="todos"   onclick="setFilterPill('mprev-filter-bar','todos',renderManutencaoPreventiva)">Todos</button>
+          <button class="filter-pill"        data-filter="alerta"  onclick="setFilterPill('mprev-filter-bar','alerta',renderManutencaoPreventiva)">Com Alerta</button>
+          <button class="filter-pill"        data-filter="vencida" onclick="setFilterPill('mprev-filter-bar','vencida',renderManutencaoPreventiva)">Vencidas</button>
+          <button class="filter-pill"        data-filter="ATIVA"   onclick="setFilterPill('mprev-filter-bar','ATIVA',renderManutencaoPreventiva)">Ativas</button>
+          <button class="filter-pill"        data-filter="INATIVA" onclick="setFilterPill('mprev-filter-bar','INATIVA',renderManutencaoPreventiva)">Inativas</button>
+        </div>
+        <table>
+          <thead id="mprev-thead">
+            <tr><th>Imóvel</th><th>Serviço</th><th>Periodicidade</th><th>Última Exec.</th><th>Próxima Exec.</th><th>Aviso</th><th>Status</th><th>Ações</th></tr>
+          </thead>
+          <tbody id="mprev-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ USUÁRIOS ══ -->
+    <div id="page-usuarios" class="page">
+      <div class="cards-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));margin-bottom:20px">
+        <div class="card">
+          <div class="card-icon blue">👥</div>
+          <div class="card-label">Total de Usuários</div>
+          <div class="card-value" id="usr-total">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon purple">👑</div>
+          <div class="card-label">Administradores</div>
+          <div class="card-value" id="usr-admins">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon green">✅</div>
+          <div class="card-label">Usuários Ativos</div>
+          <div class="card-value" id="usr-ativos">—</div>
+        </div>
+        <div class="card">
+          <div class="card-icon red">🔒</div>
+          <div class="card-label">Inativos</div>
+          <div class="card-value" id="usr-inativos">—</div>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <div class="table-header">
+          <h3>Controle de Acesso</h3>
+          <button class="btn btn-primary" onclick="openUsuario()">+ Novo Usuário</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Permissões</th><th>Status</th><th>Ações</th></tr>
+          </thead>
+          <tbody id="usr-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ RELATÓRIOS ══ -->
+    <div id="page-relatorios" class="page">
+      <div class="rel-layout">
+
+        <!-- Painel de configuração -->
+        <div class="table-wrapper rel-config-card">
+          <div class="table-header"><h3>📋 Configurar Relatório</h3></div>
+          <div class="rel-config-body">
+
+            <div class="form-group">
+              <label>Tipo de Relatório</label>
+              <select id="rel-tipo" onchange="relInitFiltros()">
+                <option value="">Selecione...</option>
+                <option value="imoveis">🏠 Imóveis</option>
+                <option value="inquilinos">👥 Inquilinos</option>
+                <option value="contratos">📄 Contratos</option>
+                <option value="financeiro">💰 Financeiro</option>
+                <option value="manutencao">🔧 Manutenção</option>
+                <option value="resumo-financeiro">📊 Resumo Financeiro por Contrato</option>
+              </select>
+            </div>
+
+            <div id="rel-filtros"></div>
+
+            <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="gerarRelatorio()">🔍 Gerar Relatório</button>
+
+            <div id="rel-export-btns" style="display:none;margin-top:10px;gap:8px">
+              <button class="btn btn-success rel-export-btn" onclick="exportarExcel()">
+                <span style="font-size:18px">📊</span>
+                <span>Exportar Excel<br><small>.xlsx</small></span>
+              </button>
+              <button class="btn btn-danger rel-export-btn" onclick="exportarPDF()">
+                <span style="font-size:18px">📄</span>
+                <span>Exportar PDF<br><small>.pdf</small></span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Preview -->
+        <div class="table-wrapper rel-preview-card">
+          <div class="table-header">
+            <h3 id="rel-preview-titulo">Prévia do Relatório</h3>
+            <span id="rel-preview-count" style="font-size:12px;color:var(--gray-400);font-weight:500"></span>
+          </div>
+          <div id="rel-preview-area">
+            <div class="empty" style="padding:60px 20px">
+              <div class="empty-icon">📋</div>
+              <p>Selecione um tipo, configure os filtros e clique em <strong>Gerar Relatório</strong></p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ══ CONFIG ══ -->
+    <div id="page-config" class="page">
+      <div style="max-width:780px">
+
+        <!-- LISTAS EDITÁVEIS -->
+        <div style="margin-bottom:24px">
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">Listas do Sistema</h3>
+          <p style="font-size:13px;color:var(--gray-400)">Adicione ou remova itens de qualquer seleção usada nos cadastros. As alterações são salvas automaticamente.</p>
+        </div>
+        <div id="cfg-listas-grid" class="cfg-listas-grid"></div>
+
+        <!-- CAMPOS PERSONALIZADOS -->
+        <div style="margin-bottom:16px;margin-top:32px">
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">Campos Personalizados</h3>
+          <p style="font-size:13px;color:var(--gray-400)">Adicione campos extras a qualquer formulário. Escolha o nome, o tipo e clique em "+ Adicionar Campo". Salvo automaticamente.</p>
+        </div>
+        <div id="cfg-campos-extras-grid" class="cfg-listas-grid"></div>
+
+        <!-- DADOS DO LOCADOR -->
+        <div class="card" style="margin-bottom:20px;margin-top:32px">
+          <h3 style="margin-bottom:16px;font-size:15px;font-weight:700">Dados do Locador (para contratos)</h3>
+          <div class="form-grid">
+            <div class="form-group form-col-2">
+              <label>Nome Completo</label>
+              <input id="cfg-locador-nome" type="text">
+            </div>
+            <div class="form-group">
+              <label>Estado Civil</label>
+              <input id="cfg-locador-estadoCivil" type="text" placeholder="casado, solteiro...">
+            </div>
+            <div class="form-group">
+              <label>Profissão</label>
+              <input id="cfg-locador-profissao" type="text">
+            </div>
+            <div class="form-group">
+              <label>RG</label>
+              <input id="cfg-locador-rg" type="text">
+            </div>
+            <div class="form-group">
+              <label>CPF</label>
+              <input id="cfg-locador-cpf" type="text">
+            </div>
+            <div class="form-group form-col-2">
+              <label>Endereço</label>
+              <input id="cfg-locador-endereco" type="text">
+            </div>
+            <div class="form-group">
+              <label>Telefone</label>
+              <input id="cfg-locador-telefone" type="text">
+            </div>
+            <div class="form-group">
+              <label>E-mail</label>
+              <input id="cfg-locador-email" type="email">
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveConfig()">Salvar Dados do Locador</button>
+
+        <!-- ENERGIA ELÉTRICA -->
+        <div style="margin-bottom:16px;margin-top:40px">
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">⚡ Energia Elétrica — Padrão</h3>
+          <p style="font-size:13px;color:var(--gray-400)">Define o padrão para <strong>novos imóveis</strong>. Cada imóvel pode ter sua própria configuração (edite o imóvel para alterar individualmente). Com Solar os campos de leitura aparecem no financeiro; com Coelba o inquilino paga a concessionária diretamente.</p>
+        </div>
+        <div class="card" style="margin-bottom:20px">
+          <div class="form-grid">
+            <div class="form-group form-col-2">
+              <label>Tipo de cobrança de energia</label>
+              <div style="display:flex;gap:10px;flex-wrap:wrap">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 16px;border:1px solid var(--gray-200);border-radius:8px;flex:1;min-width:180px" id="cfg-energia-solar-card">
+                  <input type="radio" name="cfg-energia-tipo" value="solar" id="cfg-energia-solar" onchange="toggleEnergiaConfig()" checked>
+                  <span style="font-size:13px">☀️ <strong>Energia Solar</strong><br><span style="font-size:11px;color:var(--gray-400)">Cobra pelo kWh — leitura dos medidores</span></span>
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 16px;border:1px solid var(--gray-200);border-radius:8px;flex:1;min-width:180px" id="cfg-energia-coelba-card">
+                  <input type="radio" name="cfg-energia-tipo" value="coelba" id="cfg-energia-coelba" onchange="toggleEnergiaConfig()">
+                  <span style="font-size:13px">⚡ <strong>Coelba / Concessionária</strong><br><span style="font-size:11px;color:var(--gray-400)">Inquilino paga direto — sem cobrança no boleto</span></span>
+                </label>
+              </div>
+            </div>
+            <div class="form-group" id="cfg-energia-kwh-group">
+              <label>Valor do kWh (R$) <span style="font-size:11px;color:var(--gray-400)">padrão para novos lançamentos</span></label>
+              <input type="number" id="cfg-energia-kwh" step="0.0001" min="0" placeholder="0,0000">
+              <span style="font-size:11px;color:var(--gray-400);margin-top:4px;display:block">Preenchido automaticamente ao abrir o formulário financeiro</span>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-bottom:32px" onclick="saveEnergiaConfig()">💾 Salvar Configuração de Energia</button>
+
+        <!-- INTEGRAÇÃO ASAAS -->
+        <div style="margin-bottom:16px;margin-top:40px">
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">💳 Integração Asaas — Boletos</h3>
+          <p style="font-size:13px;color:var(--gray-400)">Configure sua chave API do Asaas e habilite a geração automática de boletos e baixa automática via webhook.</p>
+        </div>
+        <div class="card" style="margin-bottom:20px">
+
+          <!-- Status da conexão -->
+          <div id="asaas-status-bar" style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;background:var(--gray-100);margin-bottom:20px">
+            <span id="asaas-status-dot" style="width:10px;height:10px;border-radius:50%;background:var(--gray-300);flex-shrink:0"></span>
+            <span id="asaas-status-text" style="font-size:13px;color:var(--gray-600)">Não configurado</span>
+            <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="testAsaasConnection()">🔌 Testar Conexão</button>
+          </div>
+
+          <div class="form-grid">
+
+            <!-- Chave API -->
+            <div class="form-group form-col-2">
+              <label>Chave API do Asaas <span style="font-size:11px;color:var(--gray-400)">(access_token)</span></label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="password" id="cfg-asaas-key" placeholder="$aact_hmlg_ou_prod_..." style="flex:1;font-family:monospace;font-size:12px">
+                <button class="btn btn-ghost btn-sm" type="button" onclick="toggleAsaasKey()" id="cfg-asaas-key-toggle" title="Mostrar/ocultar chave">👁</button>
+              </div>
+              <span id="cfg-asaas-key-atual" style="font-size:11px;color:var(--gray-400);margin-top:4px;display:block"></span>
+              <span style="font-size:11px;color:var(--gray-400)">Obtenha em: Asaas → Configurações → Integrações → Chaves de API</span>
+            </div>
+
+            <!-- Ambiente -->
+            <div class="form-group form-col-2">
+              <label>Ambiente</label>
+              <div style="display:flex;gap:10px">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:8px 14px;border:1px solid var(--gray-200);border-radius:6px;flex:1">
+                  <input type="radio" name="cfg-asaas-env" id="cfg-asaas-env-sandbox" value="sandbox" checked>
+                  <span style="font-size:13px">🧪 Sandbox <span style="font-size:11px;color:var(--gray-400)">(testes)</span></span>
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:8px 14px;border:1px solid var(--gray-200);border-radius:6px;flex:1">
+                  <input type="radio" name="cfg-asaas-env" id="cfg-asaas-env-prod" value="production">
+                  <span style="font-size:13px">🚀 Produção <span style="font-size:11px;color:var(--gray-400)">(real)</span></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Token webhook (opcional) -->
+            <div class="form-group form-col-2">
+              <label>Token do Webhook <span style="font-size:11px;color:var(--gray-400)">(opcional — segurança extra)</span></label>
+              <input type="password" id="cfg-asaas-webhook-token" placeholder="Deixe em branco para não usar">
+            </div>
+
+            <!-- Nome Beneficiário -->
+            <div class="form-group form-col-2">
+              <label>Nome do Beneficiário nos Boletos</label>
+              <input type="text" id="cfg-asaas-beneficiario" placeholder="Ex: Adriano Bonin — Gestão de Imóveis">
+              <span style="font-size:11px;color:var(--gray-400);margin-top:4px;display:block">Aparece na descrição do boleto e na mensagem enviada ao inquilino via WhatsApp</span>
+            </div>
+
+            <!-- Habilitar / Auto-gerar -->
+            <div class="form-group form-col-2">
+              <label>Opções</label>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                  <input type="checkbox" id="cfg-asaas-ativo" style="width:16px;height:16px">
+                  <span style="font-size:13px">Habilitar integração com Asaas</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                  <input type="checkbox" id="cfg-asaas-autogerar" style="width:16px;height:16px">
+                  <span style="font-size:13px">Gerar boleto automaticamente ao salvar parcela</span>
+                </label>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Webhook URL -->
+          <div style="margin-top:8px;padding:12px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe">
+            <p style="font-size:12px;font-weight:600;color:#1e40af;margin-bottom:6px">📥 URL do Webhook — configure no painel Asaas</p>
+            <div style="display:flex;align-items:center;gap:8px">
+              <code id="asaas-webhook-url" style="font-size:11px;background:#dbeafe;padding:4px 8px;border-radius:4px;flex:1;word-break:break-all"></code>
+              <button class="btn btn-ghost btn-sm" onclick="copiarWebhookUrl()">Copiar</button>
+            </div>
+            <p style="font-size:11px;color:#3b82f6;margin-top:6px">No painel Asaas: Configurações → Integrações → Webhooks → Nova URL → cole o endereço acima → marque <strong>PAYMENT_RECEIVED</strong> e <strong>PAYMENT_CONFIRMED</strong></p>
+          </div>
+
+        </div>
+        <button class="btn btn-primary" onclick="saveAsaasConfig()">💾 Salvar e Aplicar Configurações Asaas</button>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</main>
+
+<!-- ══ PORTAL DO INQUILINO ══ -->
+<div id="page-portal" class="page">
+  <div class="portal-container">
+    <div class="portal-hero">
+      <div class="portal-avatar-lg" id="portal-avatar">AB</div>
+      <div>
+        <h2 id="portal-nome">—</h2>
+        <p id="portal-imovel" style="font-size:13px;color:var(--gray-400);margin-top:4px">—</p>
+      </div>
+    </div>
+    <div class="portal-tabs-bar">
+      <button class="portal-tab active" data-tab="ck" onclick="portalTab('ck',this)">📋 Vistoria</button>
+      <button class="portal-tab" data-tab="ct" onclick="portalTab('ct',this)">📄 Contrato</button>
+      <button class="portal-tab" data-tab="bl" onclick="portalTab('bl',this)">🏦 Boletos</button>
+    </div>
+    <div id="portal-tab-ck" class="portal-tab-content active">
+      <div id="portal-ck-lista"></div>
+    </div>
+    <div id="portal-tab-ct" class="portal-tab-content">
+      <div id="portal-ct-lista"></div>
+    </div>
+    <div id="portal-tab-bl" class="portal-tab-content">
+      <div id="portal-bl-lista"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL IMÓVEL ══ -->
+<div class="modal-overlay" id="modal-imovel">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <h3 id="modal-imo-title">Imóvel</h3>
+      <button class="modal-close" onclick="closeModal('modal-imovel')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-imovel">
+        <div class="form-section-label">Dados do Imóvel</div>
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Nome do Imóvel *</label>
+            <input name="nome" type="text" required>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Endereço</label>
+            <input name="endereco" type="text">
+          </div>
+          <div class="form-group">
+            <label>Bairro</label>
+            <input name="bairro" type="text">
+          </div>
+          <div class="form-group">
+            <label>Cidade</label>
+            <input name="cidade" type="text">
+          </div>
+          <div class="form-group">
+            <label>UF</label>
+            <input name="uf" type="text" maxlength="2">
+          </div>
+          <div class="form-group">
+            <label>CEP</label>
+            <input name="cep" type="text">
+          </div>
+          <div class="form-group">
+            <label>Tipo de Imóvel</label>
+            <select name="tipo"></select>
+          </div>
+          <div class="form-group">
+            <label>Andar</label>
+            <input name="andar" type="text">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Nº Medidor / COELBA</label>
+            <input name="medidor" type="text">
+          </div>
+          <div class="form-group">
+            <label>Valor do Aluguel (R$)</label>
+            <input name="valorAluguel" type="number" step="0.01" min="0">
+          </div>
+          <div class="form-group">
+            <label>Taxa de Água (R$)</label>
+            <input name="taxaAgua" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group">
+            <label>Taxa de Manutenção Predial (R$)</label>
+            <input name="taxaManutencao" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group">
+            <label>Taxas Extras (R$)</label>
+            <input name="taxasExtras" type="number" step="0.01" min="0">
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select name="status"></select>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Observações</label>
+            <textarea name="observacoes"></textarea>
+          </div>
+        </div>
+
+        <!-- ENERGIA -->
+        <div class="form-section-label">Energia Elétrica</div>
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Tipo de cobrança de energia neste imóvel</label>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 16px;border:1px solid var(--gray-200);border-radius:8px;flex:1;min-width:160px">
+                <input type="radio" name="tipoEnergia" value="solar" onchange="toggleImovelEnergia()" checked>
+                <span style="font-size:13px">☀️ <strong>Energia Solar</strong><br><span style="font-size:11px;color:var(--gray-400)">Cobra pelo kWh — leituras dos medidores</span></span>
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 16px;border:1px solid var(--gray-200);border-radius:8px;flex:1;min-width:160px">
+                <input type="radio" name="tipoEnergia" value="coelba" onchange="toggleImovelEnergia()">
+                <span style="font-size:13px">⚡ <strong>Coelba / Concessionária</strong><br><span style="font-size:11px;color:var(--gray-400)">Inquilino paga direto — sem cobrança</span></span>
+              </label>
+            </div>
+          </div>
+          <div class="form-group" id="imo-energia-kwh-group">
+            <label>Valor do kWh (R$) <span style="font-size:11px;color:var(--gray-400)">padrão deste imóvel</span></label>
+            <input name="valorKwh" type="number" step="0.0001" min="0" placeholder="0,0000">
+          </div>
+        </div>
+
+        <!-- FOTOS -->
+        <div class="form-section-label">Fotos do Imóvel</div>
+        <label class="foto-drop-zone" for="imo-foto-input">
+          <div class="foto-drop-icon">📷</div>
+          <p>Clique ou arraste fotos aqui</p>
+          <p class="file-hint">JPG, PNG, WEBP — múltiplas fotos • máx. 10 MB cada (compressão automática)</p>
+        </label>
+        <input type="file" id="imo-foto-input" accept="image/*" multiple style="display:none"
+               onchange="addFotosImovel(this)">
+        <div id="imo-fotos-grid" class="fotos-grid-edit" style="margin-top:12px"></div>
+        <div id="ce-form-imovel"></div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-imovel')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveImovel()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL FICHA DO IMÓVEL ══ -->
+<div class="modal-overlay" id="modal-imo-ficha">
+  <div class="modal modal-ficha">
+    <div class="modal-head">
+      <h3>Ficha do Imóvel</h3>
+      <button class="modal-close" onclick="closeModal('modal-imo-ficha')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+
+      <!-- HEADER -->
+      <div class="ficha-imo-header">
+        <div>
+          <h2 id="ficha-imo-nome">—</h2>
+          <span id="ficha-imo-status" class="badge badge-blue">—</span>
+        </div>
+        <div id="ficha-imo-id" data-imo-id=""></div>
+      </div>
+
+      <!-- DETALHES EM DUAS COLUNAS -->
+      <div class="ficha-section">
+        <div class="ficha-section-title">Informações</div>
+        <div class="ficha-grid">
+          <div><span class="ficha-label">Tipo</span><span id="fi-tipo">—</span></div>
+          <div><span class="ficha-label">Andar</span><span id="fi-andar">—</span></div>
+          <div class="ficha-full"><span class="ficha-label">Endereço</span><span id="fi-end">—</span></div>
+          <div><span class="ficha-label">Bairro</span><span id="fi-bairro">—</span></div>
+          <div><span class="ficha-label">Cidade / UF</span><span id="fi-cidade">—</span></div>
+          <div><span class="ficha-label">CEP</span><span id="fi-cep">—</span></div>
+          <div><span class="ficha-label">Medidor</span><span id="fi-medidor">—</span></div>
+          <div><span class="ficha-label">Valor do Aluguel</span><strong id="fi-aluguel">—</strong></div>
+          <div><span class="ficha-label">Taxa de Água</span><span id="fi-taxa-agua">—</span></div>
+          <div><span class="ficha-label">Taxa Manutenção Predial</span><span id="fi-taxa-manutencao">—</span></div>
+          <div><span class="ficha-label">Taxas Extras</span><span id="fi-taxas">—</span></div>
+          <div><span class="ficha-label">Total</span><strong id="fi-total" style="color:var(--success)">—</strong></div>
+          <div class="ficha-full"><span class="ficha-label">Observações</span><span id="fi-obs">—</span></div>
+        </div>
+      </div>
+
+      <!-- CONTRATO ATIVO -->
+      <div class="ficha-section">
+        <div class="ficha-section-title">Contrato Ativo</div>
+        <div id="fi-contratos"></div>
+      </div>
+
+      <!-- GALERIA DE FOTOS -->
+      <div class="ficha-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div class="ficha-section-title" style="margin-bottom:0">Fotos</div>
+          <button id="fi-btn-zip" class="btn btn-primary btn-sm" style="display:none">⬇ Baixar Todas (ZIP)</button>
+        </div>
+        <div id="fi-fotos-grid" class="fotos-grid-ficha"></div>
+      </div>
+
+      <!-- CHECKLIST DE VISTORIA -->
+      <div class="ficha-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div class="ficha-section-title" style="margin-bottom:0">Checklist de Vistoria</div>
+          <button class="btn btn-primary btn-sm" onclick="openChecklistFotos(parseInt(document.getElementById('ficha-imo-id').dataset.imoId))">📋 Abrir Checklist</button>
+        </div>
+        <div id="fi-checklist-resumo" style="font-size:13px;color:var(--gray-400)">Nenhum item registrado</div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-imo-ficha')">Fechar</button>
+      <button class="btn btn-primary" onclick="closeModal('modal-imo-ficha'); openImovel(parseInt(document.getElementById('ficha-imo-id').dataset.imoId))">Editar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL INQUILINO (EDIÇÃO) ══ -->
+<div class="modal-overlay" id="modal-inquilino">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <h3 id="modal-inq-title">Inquilino</h3>
+      <button class="modal-close" onclick="closeModal('modal-inquilino')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-inquilino">
+        <!-- TIPO DE PESSOA -->
+        <div class="tipo-pessoa-toggle">
+          <button type="button" class="tipo-btn active" id="tipo-btn-fisica" onclick="toggleTipoPessoa('fisica')">Pessoa Física</button>
+          <button type="button" class="tipo-btn" id="tipo-btn-juridica" onclick="toggleTipoPessoa('juridica')">Pessoa Jurídica</button>
+        </div>
+        <input type="hidden" name="tipoPessoa" id="inq-tipo-pessoa" value="fisica">
+
+        <!-- DADOS PESSOAIS -->
+        <div class="form-section-label">Dados Pessoais</div>
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label><span id="inq-label-nome">Nome Completo</span> *</label>
+            <input name="nome" id="inq-campo-nome" type="text">
+          </div>
+          <div class="form-group">
+            <label><span id="inq-label-cpf">CPF</span> *</label>
+            <input name="cpf" id="inq-campo-cpf" type="text" placeholder="000.000.000-00">
+          </div>
+
+          <!-- SOMENTE PESSOA FÍSICA -->
+          <div class="form-group inq-pf-field">
+            <label>RG</label>
+            <input name="rg" type="text">
+          </div>
+          <div class="form-group inq-pf-field">
+            <label>Estado Civil</label>
+            <input name="estadoCivil" type="text" placeholder="casado, solteiro...">
+          </div>
+          <div class="form-group inq-pf-field">
+            <label>Profissão</label>
+            <input name="profissao" type="text">
+          </div>
+
+          <!-- SOMENTE PESSOA JURÍDICA -->
+          <div class="form-group inq-pj-field" style="display:none">
+            <label>Inscrição Estadual</label>
+            <input name="inscricaoEstadual" type="text">
+          </div>
+          <div class="form-group form-col-2 inq-pj-field" style="display:none">
+            <label>Nome do Representante Legal</label>
+            <input name="nomeRepresentante" type="text" placeholder="Nome completo do representante">
+          </div>
+          <div class="form-group inq-pj-field" style="display:none">
+            <label>CPF do Representante</label>
+            <input name="cpfRepresentante" type="text">
+          </div>
+          <div class="form-group inq-pj-field" style="display:none">
+            <label>Cargo / Função</label>
+            <input name="cargoRepresentante" type="text" placeholder="Sócio, Diretor...">
+          </div>
+
+          <div class="form-group">
+            <label>Celular *</label>
+            <input name="celular" id="inq-campo-celular" type="text" placeholder="(00) 00000-0000">
+          </div>
+          <div class="form-group">
+            <label>Telefone</label>
+            <input name="telefone" type="text" placeholder="(00) 0000-0000">
+          </div>
+          <div class="form-group">
+            <label>E-mail</label>
+            <input name="email" type="email">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Observações</label>
+            <textarea name="observacoes"></textarea>
+          </div>
+        </div>
+
+        <!-- CO-LOCATÁRIOS -->
+        <div class="form-section-label">Co-locatários</div>
+        <div id="inq-moradores-lista" class="moradores-lista"></div>
+        <div class="morador-add-form" id="morador-add-form" style="display:none">
+          <div class="form-grid">
+            <div class="form-group form-col-2">
+              <label>Nome Completo *</label>
+              <input id="mor-nome" type="text" placeholder="Nome completo do co-locatário">
+            </div>
+            <div class="form-group">
+              <label>CPF</label>
+              <input id="mor-cpf" type="text">
+            </div>
+            <div class="form-group">
+              <label>RG</label>
+              <input id="mor-rg" type="text">
+            </div>
+            <div class="form-group">
+              <label>Estado Civil</label>
+              <input id="mor-estadoCivil" type="text" placeholder="casado, solteiro...">
+            </div>
+            <div class="form-group">
+              <label>Profissão</label>
+              <input id="mor-profissao" type="text">
+            </div>
+            <div class="form-group">
+              <label>Celular</label>
+              <input id="mor-celular" type="text">
+            </div>
+          </div>
+          <div class="morador-add-btns">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="cancelarAddMorador()">Cancelar</button>
+            <button type="button" class="btn btn-success btn-sm" onclick="confirmarAddMorador()">Confirmar</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-add-morador" onclick="showAddMorador()">+ Adicionar Co-locatário</button>
+
+        <!-- DOCUMENTOS -->
+        <div class="form-section-label">Documentos</div>
+        <div class="doc-add-row">
+          <select id="inq-doc-tipo" class="doc-tipo-sel"></select>
+          <label class="btn btn-ghost btn-sm doc-file-label" for="inq-doc-file">📎 Selecionar arquivo</label>
+          <input type="file" id="inq-doc-file" accept=".pdf,image/*" style="display:none">
+          <button type="button" class="btn btn-success btn-sm" onclick="addDocInquilino()">+ Adicionar</button>
+        </div>
+        <div id="inq-docs-lista" class="docs-lista"></div>
+        <div id="ce-form-inquilino"></div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-inquilino')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveInquilino()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL FICHA DO INQUILINO ══ -->
+<div class="modal-overlay" id="modal-inq-ficha">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <h3>Ficha do Inquilino</h3>
+      <button class="modal-close" onclick="closeModal('modal-inq-ficha')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+
+      <!-- HEADER DA FICHA -->
+      <div class="ficha-header">
+        <div class="ficha-avatar-lg" id="ficha-avatar">AB</div>
+        <div class="ficha-header-info">
+          <h2 id="ficha-nome">—</h2>
+          <p><span class="ficha-label">CPF/CNPJ</span><span id="ficha-cpf">—</span></p>
+        </div>
+      </div>
+
+      <!-- DADOS DA EMPRESA (PJ) -->
+      <div class="ficha-section" id="ficha-pj-section" style="display:none">
+        <div class="ficha-section-title">Pessoa Jurídica</div>
+        <div class="ficha-grid">
+          <div><span class="ficha-label">CNPJ</span><span id="ficha-pj-cnpj">—</span></div>
+          <div><span class="ficha-label">Insc. Estadual</span><span id="ficha-pj-ie">—</span></div>
+          <div class="ficha-full"><span class="ficha-label">Representante</span><span id="ficha-pj-rep">—</span></div>
+          <div><span class="ficha-label">CPF do Representante</span><span id="ficha-pj-rep-cpf">—</span></div>
+          <div><span class="ficha-label">Cargo</span><span id="ficha-pj-rep-cargo">—</span></div>
+        </div>
+      </div>
+
+      <!-- CO-LOCATÁRIOS -->
+      <div class="ficha-section" id="ficha-moradores-section" style="display:none">
+        <div class="ficha-section-title">Co-locatários</div>
+        <div id="ficha-moradores"></div>
+      </div>
+
+      <!-- CONTATOS -->
+      <div class="ficha-section">
+        <div class="ficha-section-title">Contato</div>
+        <div class="ficha-grid">
+          <div><span class="ficha-label">Celular</span><span id="ficha-celular">—</span></div>
+          <div><span class="ficha-label">Telefone</span><span id="ficha-tel">—</span></div>
+          <div class="ficha-full"><span class="ficha-label">E-mail</span><span id="ficha-email">—</span></div>
+          <div class="ficha-full"><span class="ficha-label">Observações</span><span id="ficha-obs">—</span></div>
+        </div>
+      </div>
+
+      <!-- CONTRATOS -->
+      <div class="ficha-section">
+        <div class="ficha-section-title">Contratos Vinculados</div>
+        <div id="ficha-contratos"></div>
+      </div>
+
+      <!-- DOCUMENTOS -->
+      <div class="ficha-section">
+        <div class="ficha-section-title">Documentos Anexados</div>
+        <div id="ficha-docs" class="ficha-docs-grid"></div>
+      </div>
+
+      <!-- CHECKLISTS DE VISTORIA VINCULADOS -->
+      <div class="ficha-section" id="ficha-ck-section">
+        <div class="ficha-section-title">Checklists de Vistoria</div>
+        <div id="ficha-ck-lista"></div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-inq-ficha')">Fechar</button>
+      <button class="btn btn-primary" onclick="closeModal('modal-inq-ficha'); openInquilino(parseInt(document.getElementById('ficha-nome').dataset.id))">Editar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL CONTRATO ══ -->
+<div class="modal-overlay" id="modal-contrato">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-ct-title">Contrato</h3>
+      <button class="modal-close" onclick="closeModal('modal-contrato')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-contrato">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Código do Contrato *</label>
+            <input name="codigo" type="text" required placeholder="Ex: CT007">
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select name="status"></select>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Imóvel</label>
+            <select name="imovel" onchange="preencherValoresImovel(this)"></select>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Inquilino</label>
+            <select name="inquilino"></select>
+          </div>
+          <div class="form-group">
+            <label>Data Início</label>
+            <input name="dataInicio" type="date">
+          </div>
+          <div class="form-group">
+            <label>Data Término</label>
+            <input name="dataTermino" type="date">
+          </div>
+          <div class="form-group">
+            <label>Valor Mensal (R$)</label>
+            <input name="valorMensal" type="number" step="0.01" min="0">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Ajustes Previstos</label>
+            <input name="ajustes" type="text" placeholder="Ex: Reajuste anual pelo IPCA">
+          </div>
+          <div class="form-group">
+            <label>Data do Contrato</label>
+            <input name="dataContrato" type="date">
+          </div>
+          <div class="form-group">
+            <label>Dia de Vencimento</label>
+            <input name="diaVencimento" type="number" min="1" max="31" placeholder="Ex: 10">
+          </div>
+          <div class="form-group">
+            <label>Caução / Garantia (R$)</label>
+            <input name="caucao" type="number" step="0.01" min="0" placeholder="0,00" oninput="updateCaucaoInfo()">
+            <div class="caucao-parcelamento">
+              <span class="caucao-parc-label">Parcelamento:</span>
+              <select name="caucaoParcelas" id="caucao-parcelas-sel" onchange="updateCaucaoInfo()">
+                <option value="1">1x (à vista)</option>
+                <option value="2">2x</option>
+                <option value="3">3x</option>
+                <option value="4">4x</option>
+                <option value="6">6x</option>
+                <option value="12">12x</option>
+              </select>
+              <span id="caucao-parcela-info" class="caucao-parcela-info"></span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Taxa de Água (R$)</label>
+            <input name="taxaAgua" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group">
+            <label>Taxa de Manutenção Predial (R$)</label>
+            <input name="taxaManutencao" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group">
+            <label>Taxas Extras (R$)</label>
+            <input name="taxasExtras" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Arquivo do Contrato</label>
+            <div id="ct-file-zone"></div>
+            <input type="file" id="ct-file-input" accept=".pdf,image/*" style="display:none" onchange="handleFileInputChange(this)">
+          </div>
+        </div>
+        <div id="ce-form-contrato"></div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-contrato')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveContrato()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL FINANCEIRO ══ -->
+<div class="modal-overlay" id="modal-financeiro">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <h3 id="modal-fin-title">Registrar Pagamento</h3>
+      <button class="modal-close" onclick="closeModal('modal-financeiro')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-financeiro" oninput="calcFinanceiro()">
+
+        <!-- 1. IDENTIFICAÇÃO -->
+        <div class="form-section-label">Identificação</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Data de Vencimento *</label>
+            <input name="dataPagamento" type="date" required onchange="calcDiasAtraso()">
+          </div>
+          <div class="form-group">
+            <label>Contrato *</label>
+            <select name="contrato" required onchange="autoFillContratoValor()"></select>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Inquilino</label>
+            <select name="inquilino"></select>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Valor do Contrato (R$)</label>
+            <input name="valorContrato" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+        </div>
+
+        <!-- 2. TAXAS CONTRATUAIS -->
+        <div class="form-section-label">Taxas Contratuais</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Taxa de Água (R$)</label>
+            <input name="consumoAgua" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group">
+            <label>Taxa de Manutenção Predial (R$)</label>
+            <input name="taxaManutencao" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group">
+            <label>Taxas Extras (R$)</label>
+            <input name="taxasExtras" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+        </div>
+
+        <!-- 3. CONSUMO DE ENERGIA -->
+        <div id="fin-energia-section">
+          <div class="form-section-label">Consumo de Energia Elétrica <span id="fin-energia-tipo-badge" style="font-size:11px;font-weight:400;color:var(--gray-400);margin-left:6px"></span></div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Leitura Anterior do Contador (kWh)</label>
+              <input name="leituraAnterior" type="number" step="0.001" min="0" placeholder="0" oninput="calcFinanceiro()">
+            </div>
+            <div class="form-group">
+              <label>Leitura Atual do Contador (kWh)</label>
+              <input name="leituraAtual" type="number" step="0.001" min="0" placeholder="0" oninput="calcFinanceiro()">
+            </div>
+            <div class="form-group">
+              <label>Valor do kWh (R$)</label>
+              <input name="valorKwh" type="number" step="0.0001" min="0" placeholder="0,0000" oninput="calcFinanceiro()">
+            </div>
+            <div class="form-group">
+              <label>Consumo do Período (Atual − Anterior)</label>
+              <div class="calc-result" id="fin-consumo-kwh">0,000 kWh</div>
+            </div>
+            <div class="form-group form-col-2">
+              <label>Total de Energia = Consumo × Valor kWh</label>
+              <div class="calc-result calc-result-highlight" id="fin-total-energia">R$ 0,00</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. ENCARGOS POR ATRASO -->
+        <div class="form-section-label">Encargos por Atraso</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Multa por Atraso (%)</label>
+            <input name="pctMulta" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group">
+            <label>Valor da Multa (R$)</label>
+            <div class="calc-result calc-result-danger" id="fin-vlr-multa">R$ 0,00</div>
+          </div>
+          <div class="form-group">
+            <label>Mora por Dia (%)</label>
+            <input name="pctMora" type="number" step="0.001" min="0" placeholder="0,000" oninput="calcFinanceiro()">
+          </div>
+          <div class="form-group">
+            <label>Dias de Atraso <span style="font-size:11px;color:var(--gray-400)">(auto)</span></label>
+            <input name="diasAtraso" type="number" step="1" min="0" placeholder="0"
+                   class="input-atraso"
+                   oninput="this.classList.toggle('em-atraso', parseInt(this.value||0)>0); calcFinanceiro()">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Valor da Mora (R$)</label>
+            <div class="calc-result calc-result-danger" id="fin-vlr-mora">R$ 0,00</div>
+          </div>
+        </div>
+
+        <!-- 5. RESUMO / TOTAL -->
+        <div class="form-section-label">Resumo</div>
+        <div class="fin-resumo">
+          <div class="fin-resumo-row"><span>Valor do Contrato</span><span id="fin-resumo-contrato">R$ 0,00</span></div>
+          <div class="fin-resumo-row"><span>Taxa de Água</span><span id="fin-resumo-agua">R$ 0,00</span></div>
+          <div class="fin-resumo-row"><span>Taxa de Manutenção</span><span id="fin-resumo-manutencao">R$ 0,00</span></div>
+          <div class="fin-resumo-row"><span>Taxas Extras</span><span id="fin-resumo-extras">R$ 0,00</span></div>
+          <div class="fin-resumo-row"><span>Consumo de Energia</span><span id="fin-resumo-energia">R$ 0,00</span></div>
+          <div class="fin-resumo-row"><span>Multa por Atraso</span><span id="fin-resumo-multa" style="color:var(--danger)">R$ 0,00</span></div>
+          <div class="fin-resumo-row"><span>Mora</span><span id="fin-resumo-mora" style="color:var(--danger)">R$ 0,00</span></div>
+          <div class="fin-resumo-row fin-resumo-total"><span>TOTAL GERAL</span><span id="fin-resumo-total">R$ 0,00</span></div>
+        </div>
+
+        <!-- 6. RECEBIMENTO -->
+        <div class="form-section-label">Recebimento</div>
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Valor Recebido (R$)</label>
+            <input name="valorRecebido" type="number" step="0.01" min="0" placeholder="0,00"
+                   oninput="this.dataset.touched='1'">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Observações</label>
+            <textarea name="observacoes"></textarea>
+          </div>
+        </div>
+        <div id="ce-form-financeiro"></div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-financeiro')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveFinanceiro()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL MANUTENÇÃO ══ -->
+<div class="modal-overlay" id="modal-manutencao">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <h3 id="modal-man-title">Manutenção</h3>
+      <button class="modal-close" onclick="closeModal('modal-manutencao')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-manutencao">
+        <div class="form-section-label">Dados da Manutenção</div>
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Imóvel *</label>
+            <select name="imovel" required></select>
+          </div>
+          <div class="form-group">
+            <label>Tipo de Serviço</label>
+            <select name="tipoServico"></select>
+          </div>
+          <div class="form-group">
+            <label>Prestador de Serviço</label>
+            <input name="prestador" type="text">
+          </div>
+          <div class="form-group">
+            <label>Data do Serviço</label>
+            <input name="dataServico" type="date">
+          </div>
+          <div class="form-group">
+            <label>Custo (R$)</label>
+            <input name="custo" type="number" step="0.01" min="0">
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select name="status"></select>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Observações</label>
+            <textarea name="observacoes"></textarea>
+          </div>
+        </div>
+
+        <!-- DOCUMENTOS -->
+        <div class="form-section-label">Documentos</div>
+        <div class="man-docs-grid">
+          <div id="man-doc-zone-comprovante"></div>
+          <div id="man-doc-zone-notaFiscal"></div>
+          <div id="man-doc-zone-garantia"></div>
+        </div>
+        <div id="ce-form-manutencao"></div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-manutencao')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveManutencao()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL USUÁRIO ══ -->
+<div class="modal-overlay" id="modal-usuario">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <h3 id="modal-usuario-title">Novo Usuário</h3>
+      <button class="modal-close" onclick="closeModal('modal-usuario')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-usuario">
+        <div class="form-section-label">Dados de Acesso</div>
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Nome Completo *</label>
+            <input name="nome" type="text" id="usr-campo-nome" placeholder="Ex: João da Silva">
+          </div>
+          <div class="form-group">
+            <label>Usuário (login) *</label>
+            <input name="usuario" type="text" id="usr-campo-usuario" autocomplete="off" placeholder="Ex: joao.silva">
+          </div>
+          <div class="form-group">
+            <label>Perfil *</label>
+            <select name="perfil" onchange="usrTogglePerfil(this)">
+              <option value="usuario">Usuário</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label id="usr-senha-label">Senha *</label>
+            <input name="senha" type="password" id="usr-campo-senha" autocomplete="new-password" placeholder="••••••••">
+          </div>
+          <div class="form-group">
+            <label>Confirmar Senha *</label>
+            <input name="senhaConfirm" type="password" id="usr-campo-senha2" autocomplete="new-password" placeholder="••••••••">
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select name="ativo">
+              <option value="1">Ativo</option>
+              <option value="0">Inativo</option>
+            </select>
+          </div>
+        </div>
+        <div id="usr-perm-section">
+          <div class="form-section-label" style="display:flex;align-items:center;justify-content:space-between">
+            <span>Permissões de Acesso</span>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="usrSelectAll(true)">Selecionar Tudo</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="usrSelectAll(false)">Limpar</button>
+            </div>
+          </div>
+          <div class="perm-grid" id="usr-perm-grid"></div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-usuario')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveUsuario()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL ALTERAR SENHA ══ -->
+<div class="modal-overlay" id="modal-alterar-senha">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>🔑 Alterar Senha</h3>
+      <button class="modal-close" onclick="closeModal('modal-alterar-senha')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-alterar-senha">
+        <input type="hidden" name="userId">
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Senha Atual *</label>
+            <input name="senhaAtual" type="password" id="as-campo-atual" autocomplete="current-password" placeholder="Senha atual">
+          </div>
+          <div class="form-group">
+            <label>Nova Senha *</label>
+            <input name="novaSenha" type="password" id="as-campo-nova" autocomplete="new-password" placeholder="Nova senha">
+          </div>
+          <div class="form-group">
+            <label>Confirmar Nova Senha *</label>
+            <input name="novaSenhaConfirm" type="password" id="as-campo-confirm" autocomplete="new-password" placeholder="Confirme a nova senha">
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-alterar-senha')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveAlterarSenha()">Salvar Nova Senha</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL MANUTENÇÃO PREVENTIVA ══ -->
+<div class="modal-overlay" id="modal-mprev">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <h3 id="modal-mprev-title">Nova Manutenção Preventiva</h3>
+      <button class="modal-close" onclick="closeModal('modal-mprev')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-mprev">
+        <div class="form-section-label">Identificação</div>
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Imóvel / Área *</label>
+            <select name="imovel" required id="mprev-campo-imovel"></select>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Título do Serviço *</label>
+            <input name="titulo" type="text" id="mprev-campo-titulo" placeholder="Ex: Lavagem do Reservatório de Água">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Descrição</label>
+            <textarea name="descricao" rows="2" placeholder="Detalhes do serviço..."></textarea>
+          </div>
+        </div>
+        <div class="form-section-label">Periodicidade &amp; Alertas</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Periodicidade *</label>
+            <select name="periodicidade" onchange="mprevToggleCustom(this)">
+              <option value="mensal">Mensal (30 dias)</option>
+              <option value="bimestral">Bimestral (60 dias)</option>
+              <option value="trimestral">Trimestral (90 dias)</option>
+              <option value="semestral" selected>Semestral (180 dias)</option>
+              <option value="anual">Anual (365 dias)</option>
+              <option value="personalizado">Personalizado</option>
+            </select>
+          </div>
+          <div class="form-group" id="mprev-custom-group" style="display:none">
+            <label>Intervalo (dias) *</label>
+            <input name="intervaloDias" type="number" min="1" placeholder="Ex: 45">
+          </div>
+          <div class="form-group">
+            <label>Avisar com antecedência *</label>
+            <select name="diasAlerta">
+              <option value="7">7 dias antes</option>
+              <option value="15" selected>15 dias antes</option>
+              <option value="30">30 dias antes</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select name="status">
+              <option value="ATIVA">Ativa</option>
+              <option value="INATIVA">Inativa</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-section-label">Controle de Execução</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Última Execução</label>
+            <input name="ultimaExecucao" type="date" id="mprev-ultima" oninput="mprevCalcProxima(this.closest('form'))">
+          </div>
+          <div class="form-group">
+            <label>Próxima Execução (calculado)</label>
+            <input name="proximaExecucao" type="date" id="mprev-proxima" readonly style="background:#f5f7fa;color:#888">
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-mprev')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveManutencaoPreventiva()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL REGISTRAR EXECUÇÃO PREVENTIVA ══ -->
+<div class="modal-overlay" id="modal-exec-prev">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>✅ Registrar Execução</h3>
+      <button class="modal-close" onclick="closeModal('modal-exec-prev')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="exec-prev-info" style="background:#f0f4ff;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:14px"></div>
+      <form id="form-exec-prev">
+        <input type="hidden" name="prevId">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Data da Execução *</label>
+            <input name="dataExecucao" type="date">
+          </div>
+          <div class="form-group">
+            <label>Custo (R$)</label>
+            <input name="custo" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Observações</label>
+            <textarea name="obs" rows="2" placeholder="Prestador, materiais, observações..."></textarea>
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-exec-prev')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveExecucaoPrev()">Confirmar Execução</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL HISTÓRICO PREVENTIVA ══ -->
+<div class="modal-overlay" id="modal-hist-prev">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-hist-prev-title">Histórico de Execuções</h3>
+      <button class="modal-close" onclick="closeModal('modal-hist-prev')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="hist-prev-content"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-hist-prev')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL PREVIEW CONTRATO ══ -->
+<div class="modal-overlay" id="modal-ct-preview">
+  <div class="modal modal-contrato-preview">
+    <div class="modal-head">
+      <h3 id="preview-ct-title">Contrato Gerado</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary btn-sm" onclick="imprimirContrato()">🖨️ Imprimir</button>
+        <button class="modal-close" onclick="closeModal('modal-ct-preview')">✕</button>
+      </div>
+    </div>
+    <div class="modal-body" id="modal-ct-preview-body" style="padding:32px 40px;font-family:'Times New Roman',serif"></div>
+  </div>
+</div>
+
+<!-- ══ MODAL RENOVAÇÃO DE CONTRATO ══ -->
+<div class="modal-overlay" id="modal-renovacao">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>🔄 Renovação de Contrato</h3>
+      <button class="modal-close" onclick="closeModal('modal-renovacao')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="renov-contrato-id">
+
+      <!-- Resumo atual -->
+      <div class="renov-resumo">
+        <div class="renov-resumo-row">
+          <span id="renov-codigo" style="font-weight:700;font-size:15px"></span>
+          <span id="renov-imovel" style="color:var(--gray-600)"></span>
+          <span id="renov-inquilino" style="font-size:12px;color:var(--gray-400)"></span>
+        </div>
+        <div style="font-size:12px;color:var(--gray-400);margin-top:6px">
+          Período atual: <span id="renov-periodo-atual"></span>
+          &nbsp;|&nbsp; Valor atual: <strong id="renov-valor-atual"></strong>/mês
+        </div>
+      </div>
+
+      <!-- Novo período -->
+      <div class="form-section-label" style="margin-top:16px">Novo Período</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Data de Início</label>
+          <input type="date" id="renov-inicio" onchange="calcRenovacao()">
+        </div>
+        <div class="form-group">
+          <label>Data de Término</label>
+          <input type="date" id="renov-termino" onchange="calcRenovacao()">
+        </div>
+      </div>
+
+      <!-- Reajuste -->
+      <div class="form-section-label" style="margin-top:4px">Reajuste</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Percentual de Reajuste (%)</label>
+          <input type="number" id="renov-pct" step="0.01" placeholder="0,00" oninput="calcRenovacao()">
+        </div>
+        <div class="form-group">
+          <label>Aplicar índice rápido</label>
+          <div id="renov-indices-btns" style="display:flex;flex-wrap:wrap;gap:6px;padding-top:4px">
+            <span style="font-size:12px;color:var(--gray-400);font-style:italic">Carregando índices...</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Preview novo valor -->
+      <div class="renov-preview">
+        <div>
+          <div style="font-size:11px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px">Novo valor mensal</div>
+          <strong id="renov-novo-valor" style="font-size:22px;color:var(--primary)">—</strong>
+        </div>
+        <div style="border-left:2px solid var(--gray-200);padding-left:16px">
+          <div style="font-size:11px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px">Variação</div>
+          <span id="renov-delta" style="font-size:15px;font-weight:600">—</span>
+        </div>
+        <div style="border-left:2px solid var(--gray-200);padding-left:16px">
+          <div style="font-size:11px;color:var(--gray-400);text-transform:uppercase;letter-spacing:.5px">Parcelas geradas</div>
+          <span id="renov-parcelas-preview" style="font-size:15px;font-weight:600;color:var(--gray-700)">—</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-renovacao')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarRenovacao()">✔ Confirmar Renovação</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL BOLETO -->
+<div class="modal-overlay" id="modal-boleto">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-head">
+      <h3>🏦 Boleto Gerado</h3>
+      <button class="modal-close" onclick="closeModal('modal-boleto')">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:16px">
+
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px">
+        <p style="font-size:12px;font-weight:600;color:#166534;margin-bottom:6px">Contrato / Inquilino</p>
+        <p id="boleto-info-contrato" style="font-size:14px;font-weight:600"></p>
+        <p id="boleto-info-valor" style="font-size:13px;color:#4b5563;margin-top:2px"></p>
+      </div>
+
+      <div>
+        <p style="font-size:12px;font-weight:600;color:var(--gray-600);margin-bottom:6px">Linha Digitável</p>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="boleto-linha" type="text" readonly
+            style="flex:1;font-family:monospace;font-size:12px;padding:8px 10px;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50);letter-spacing:.5px">
+          <button class="btn btn-ghost btn-sm" onclick="copiarLinhaDigitavel()">Copiar</button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px">
+        <a id="boleto-pdf-link" href="#" target="_blank" class="btn btn-primary" style="flex:1;text-align:center;text-decoration:none">
+          📄 Abrir PDF do Boleto
+        </a>
+        <button class="btn btn-ghost" onclick="enviarBoletoWhatsapp()" style="flex:1">
+          📱 Enviar WhatsApp
+        </button>
+      </div>
+
+      <div id="boleto-status-area" style="font-size:12px;color:var(--gray-400);text-align:center"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL CHECKLIST DE VISTORIA ══ -->
+<div class="modal-overlay" id="modal-checklist-fotos">
+  <div class="modal modal-xl">
+    <div class="modal-head">
+      <div>
+        <h3>📋 Checklist de Vistoria</h3>
+        <div id="ck-imo-nome" style="font-size:13px;color:var(--gray-400);margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-checklist-fotos')">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Cabeçalho: tipo + data + progresso -->
+      <div class="ck-header-bar">
+        <div class="form-row" style="flex:1;gap:12px;align-items:flex-end">
+          <div class="form-group" style="min-width:160px">
+            <label class="form-label">Tipo de Vistoria</label>
+            <select id="ck-tipo" class="form-input">
+              <option value="Entrada">Entrada</option>
+              <option value="Saída">Saída</option>
+              <option value="Periódica">Periódica</option>
+              <option value="Outro">Outro</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width:150px">
+            <label class="form-label">Data da Vistoria</label>
+            <input type="date" id="ck-data" class="form-input">
+          </div>
+        </div>
+        <div class="ck-progress-box">
+          <div id="ck-progress-bar-wrap" class="ck-progress-bar-wrap">
+            <div id="ck-progress-bar" class="ck-progress-bar"></div>
+          </div>
+          <div id="ck-progress-text" style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px">0 de 0 fotos</div>
+        </div>
+      </div>
+
+      <!-- Input de arquivo oculto (compartilhado entre itens) -->
+      <input type="file" id="ck-foto-file-input" accept="image/*" style="display:none"
+        onchange="ckCarregarFoto(this)">
+
+      <!-- Tabela de itens -->
+      <div style="overflow-x:auto;margin-top:12px">
+        <table class="ck-table" id="ck-table">
+          <thead>
+            <tr>
+              <th style="width:36px">#</th>
+              <th>Item / Cômodo</th>
+              <th style="width:130px;text-align:center">Foto</th>
+              <th>Observações</th>
+              <th style="width:44px"></th>
+            </tr>
+          </thead>
+          <tbody id="ck-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Botão adicionar item -->
+      <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="ckAddItem()">
+        + Adicionar Item
+      </button>
+
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="ckGerarPadrao()">↺ Itens Padrão</button>
+        <button class="btn btn-secondary" id="ck-btn-vincular" onclick="ckVincularInquilino()" style="background:#f0fdf4;border-color:#86efac;color:#166534">
+          👤 Vincular ao Inquilino
+        </button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeModal('modal-checklist-fotos')">Cancelar</button>
+        <button class="btn btn-primary" onclick="saveChecklistFotos()">💾 Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL VINCULAR CHECKLIST AO INQUILINO ══ -->
+<div class="modal-overlay" id="modal-ck-vincular">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">
+      <div>
+        <h3>👤 Vincular ao Inquilino</h3>
+        <div style="font-size:12px;color:var(--gray-400);margin-top:2px">Selecione um ou mais inquilinos</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-ck-vincular')">✕</button>
+    </div>
+    <div class="modal-body" style="padding-top:12px">
+      <input type="text" id="ck-vinc-search" class="form-input" placeholder="Buscar inquilino..."
+        oninput="_ckFiltrarInquilinos(this.value)" style="margin-bottom:12px">
+      <div id="ck-vinc-lista" class="ck-vinc-lista"></div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <span id="ck-vinc-count" style="font-size:12px;color:var(--gray-400)">0 selecionado(s)</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeModal('modal-ck-vincular')">Cancelar</button>
+        <button class="btn btn-primary" onclick="ckConfirmarVincular()">Vincular</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast"></div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+<script>
+  document.getElementById('topbar-date').textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+</script>
+</body>
+</html>
