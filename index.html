@@ -1324,6 +1324,11 @@
             <input name="diaVencimento" type="number" min="1" max="31" placeholder="Ex: 10">
           </div>
           <div class="form-group">
+            <label>Data da 1ª Cobrança</label>
+            <input name="dataPrimeiraCobranca" type="date" id="ct-primeira-cobranca">
+            <small style="color:var(--gray-400);font-size:11px">Se não preenchida, usa o mês do início do contrato</small>
+          </div>
+          <div class="form-group">
             <label>Caução / Garantia (R$)</label>
             <input name="caucao" type="number" step="0.01" min="0" placeholder="0,00" oninput="updateCaucaoInfo()">
             <div class="caucao-parcelamento">

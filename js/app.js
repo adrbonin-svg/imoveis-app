@@ -2198,8 +2198,9 @@ function openContrato(id = null) {
     form.valorMensal.value = c.valorMensal;
     form.ajustes.value = c.ajustes;
     form.status.value = c.status;
-    form.elements['dataContrato'].value  = c.dataContrato  || '';
-    form.elements['diaVencimento'].value = c.diaVencimento || '';
+    form.elements['dataContrato'].value           = c.dataContrato           || '';
+    form.elements['diaVencimento'].value          = c.diaVencimento          || '';
+    form.elements['dataPrimeiraCobranca'].value   = c.dataPrimeiraCobranca   || '';
     form.elements['caucao'].value                  = c.caucao                || '';
     form.elements['caucaoParcelas'].value          = c.caucaoParcelas        || 1;
     form.elements['caucaoFormaPagamento'].value    = c.caucaoFormaPagamento  || '';
@@ -2313,8 +2314,9 @@ function saveContrato() {
     valorMensal: parseFloat(form.valorMensal.value) || 0,
     ajustes: form.ajustes.value.trim(),
     status: form.status.value,
-    dataContrato:  form.elements['dataContrato'].value,
-    diaVencimento: parseInt(form.elements['diaVencimento'].value) || null,
+    dataContrato:          form.elements['dataContrato'].value,
+    diaVencimento:         parseInt(form.elements['diaVencimento'].value)    || null,
+    dataPrimeiraCobranca:  form.elements['dataPrimeiraCobranca'].value       || '',
     caucao:                parseFloat(form.elements['caucao'].value)              || 0,
     caucaoParcelas:         parseInt(form.elements['caucaoParcelas'].value)       || 1,
     caucaoFormaPagamento:  form.elements['caucaoFormaPagamento']?.value           || '',
@@ -2368,18 +2370,25 @@ function saveContrato() {
 // Gera um registro financeiro por mês de vigência do contrato
 function gerarParcelasContrato(c) {
   if (!c.dataInicio || !c.dataTermino) return 0;
-  const d1 = new Date(c.dataInicio + 'T12:00:00');
   const d2 = new Date(c.dataTermino + 'T12:00:00');
+  const diaVenc = c.diaVencimento || 10;
+
+  // Ponto de partida: dataPrimeiraCobranca se informada, senão dataInicio
+  const dataBase = c.dataPrimeiraCobranca || c.dataInicio;
+  const d1 = new Date(dataBase + 'T12:00:00');
+
+  // Calcula quantas parcelas cabem entre a 1ª cobrança e o término
   const prazo = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth());
   if (prazo <= 0) return 0;
-  const diaVenc = c.diaVencimento || 10;
 
   for (let i = 0; i < prazo; i++) {
     const totalMeses = d1.getMonth() + i;
     const ano = d1.getFullYear() + Math.floor(totalMeses / 12);
     const mes = totalMeses % 12; // 0-indexed
+    // Para a 1ª parcela usa o dia exato de dataPrimeiraCobranca; demais usam diaVencimento
+    const diaRef = (i === 0 && c.dataPrimeiraCobranca) ? d1.getDate() : diaVenc;
     const ultimoDia = new Date(ano, mes + 1, 0).getDate();
-    const dia = Math.min(diaVenc, ultimoDia);
+    const dia = Math.min(diaRef, ultimoDia);
     const dataVenc = `${ano}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
 
     DB.financeiro.push({
