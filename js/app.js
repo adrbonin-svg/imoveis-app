@@ -1429,6 +1429,7 @@ function deleteInquilino(id) {
 
 // ── IMÓVEIS ────────────────────────────────────────────
 let _imoFotosPendentes = [];
+let _predioFiltro = null;
 
 // Comprime imagem via canvas (máx 1280px, JPEG 82%)
 function comprimirImagem(file) {
@@ -1613,27 +1614,147 @@ function openImovelFicha(id) {
   document.getElementById('modal-imo-ficha').classList.add('open');
 }
 
+function renderPredios() {
+  if (!DB.predios) DB.predios = [];
+  const grid = document.getElementById('predios-grid');
+  if (!grid) return;
+  if (DB.predios.length === 0) {
+    grid.innerHTML = '<div style="color:var(--gray-400);font-size:13px;padding:8px">Nenhum prédio cadastrado. Clique em "+ Novo Prédio" para começar.</div>';
+    return;
+  }
+  grid.innerHTML = DB.predios.map(p => {
+    const unidades = DB.imoveis.filter(i => i.predioId === p.id);
+    const ocupados = unidades.filter(i => i.status === 'OCUPADO').length;
+    const ativo    = _predioFiltro === p.id;
+    return `
+      <div onclick="selecionarPredio(${p.id})" style="
+        cursor:pointer;border:2px solid ${ativo ? 'var(--primary)' : 'var(--gray-200)'};
+        border-radius:12px;padding:14px 18px;min-width:160px;background:${ativo ? 'var(--primary-light,#eff6ff)' : 'var(--white)'};
+        transition:all .15s;display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:20px">🏢</div>
+        <div style="font-weight:700;font-size:14px">${p.nome}</div>
+        <div style="font-size:11px;color:var(--gray-400)">${p.cidade || ''}${p.uf ? ' - ' + p.uf : ''}</div>
+        <div style="font-size:12px;margin-top:4px">
+          <span style="color:var(--gray-500)">${unidades.length} unidade${unidades.length !== 1 ? 's' : ''}</span>
+          ${ocupados > 0 ? `<span style="margin-left:6px;color:var(--green-600,#16a34a)">· ${ocupados} ocupada${ocupados !== 1 ? 's' : ''}</span>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px" onclick="event.stopPropagation()">
+          ${_podeAcao('imoveis','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openPredio(${p.id})">Editar</button>` : ''}
+          ${_podeAcao('imoveis','excluir') ? `<button class="btn btn-danger btn-sm" onclick="deletePredio(${p.id})">Excluir</button>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function selecionarPredio(id) {
+  _predioFiltro = (_predioFiltro === id) ? null : id;
+  renderPredios();
+  renderImoveis();
+  const titulo = document.getElementById('imo-section-title');
+  if (titulo) {
+    if (_predioFiltro) {
+      const p = (DB.predios || []).find(x => x.id === _predioFiltro);
+      titulo.textContent = `Unidades — ${p?.nome || ''}`;
+    } else {
+      titulo.textContent = 'Todas as Unidades';
+    }
+  }
+}
+
+function openPredio(id = null) {
+  if (!DB.predios) DB.predios = [];
+  const modal = document.getElementById('modal-predio');
+  const form  = document.getElementById('form-predio');
+  form.reset();
+  form.dataset.id = id || '';
+  document.getElementById('modal-predio-title').textContent = id ? 'Editar Prédio' : 'Novo Prédio';
+  if (id) {
+    const p = DB.predios.find(x => x.id === id);
+    if (p) ['nome','endereco','bairro','cidade','uf','cep','observacoes'].forEach(k => {
+      if (form[k]) form[k].value = p[k] ?? '';
+    });
+  }
+  modal.classList.add('open');
+}
+
+function savePredio() {
+  if (!DB.predios) DB.predios = [];
+  const form = document.getElementById('form-predio');
+  const id   = form.dataset.id ? parseInt(form.dataset.id) : null;
+  const data = {
+    nome:        form.nome.value.trim(),
+    endereco:    form.endereco?.value.trim() || '',
+    bairro:      form.bairro?.value.trim()   || '',
+    cidade:      form.cidade?.value.trim()   || '',
+    uf:          form.uf?.value.trim()       || '',
+    cep:         form.cep?.value.trim()      || '',
+    observacoes: form.observacoes?.value.trim() || '',
+  };
+  if (!data.nome) { toast('Nome do prédio é obrigatório', 'error'); return; }
+  if (id) {
+    const idx = DB.predios.findIndex(x => x.id === id);
+    DB.predios[idx] = { ...DB.predios[idx], ...data };
+  } else {
+    DB.predios.push({ id: nextId(DB.predios), ...data });
+  }
+  saveData();
+  closeModal('modal-predio');
+  renderPredios();
+  toast(id ? 'Prédio atualizado!' : 'Prédio cadastrado!', 'success');
+}
+
+function deletePredio(id) {
+  const unidades = DB.imoveis.filter(i => i.predioId === id).length;
+  const msg = unidades > 0
+    ? `Este prédio tem ${unidades} unidade(s) vinculada(s). Deseja excluir mesmo assim?`
+    : 'Excluir este prédio?';
+  if (!confirm_(msg)) return;
+  DB.predios = (DB.predios || []).filter(x => x.id !== id);
+  if (_predioFiltro === id) { _predioFiltro = null; }
+  saveData();
+  renderPredios();
+  renderImoveis();
+  toast('Prédio excluído');
+}
+
+function preencherEnderecoPredio() {
+  const form = document.getElementById('form-imovel');
+  if (!form || form.dataset.id) return;
+  const predioId = parseInt(form.elements['predioId']?.value);
+  if (!predioId) return;
+  const p = (DB.predios || []).find(x => x.id === predioId);
+  if (!p) return;
+  ['endereco','bairro','cidade','uf','cep'].forEach(k => {
+    if (form[k] && !form[k].value && p[k]) form[k].value = p[k];
+  });
+}
+
 function renderImoveis() {
+  renderPredios();
   const search = (document.getElementById('imo-search')?.value || '').toLowerCase();
   const statusFilter = _getActivePill('imo-filter-bar');
   let list = DB.imoveis.filter(i =>
     i.nome.toLowerCase().includes(search) ||
     (i.cidade || '').toLowerCase().includes(search)
   );
+  if (_predioFiltro) {
+    list = list.filter(i => i.predioId === _predioFiltro);
+  }
   if (statusFilter !== 'todos') {
     list = list.filter(i => i.status === statusFilter);
   }
   list = _aplicarSort(list, 'imo');
   const _imoThead = document.getElementById('imo-thead');
   if (_imoThead) _imoThead.innerHTML = '<tr>' +
-    _th('imo','nome','Imóvel') + _th('imo','cidade','Localização') +
+    _th('imo','nome','Unidade') + _thStatic('Prédio') +
     _th('imo','valorAluguel','Aluguel') + _th('imo','status','Status') +
     _thStatic('Fotos') + _thStatic('Ações') + '</tr>';
   document.getElementById('imo-tbody').innerHTML = list.length === 0
-    ? `<tr><td colspan="7"><div class="empty"><div class="empty-icon">🏠</div><p>Nenhum imóvel encontrado</p></div></td></tr>`
+    ? `<tr><td colspan="6"><div class="empty"><div class="empty-icon">🏠</div><p>Nenhuma unidade encontrada</p></div></td></tr>`
     : list.map(i => {
-        const fotos = (i.fotos || []).length;
-        const capa  = fotos > 0 ? i.fotos[0].dados : null;
+        const fotos  = (i.fotos || []).length;
+        const capa   = fotos > 0 ? i.fotos[0].dados : null;
+        const predio = (DB.predios || []).find(p => p.id === i.predioId);
         return `
         <tr>
           <td>
@@ -1642,12 +1763,12 @@ function renderImoveis() {
                 ? `<img src="${capa}" class="imo-capa-thumb" onclick="openImovelFicha(${i.id})">`
                 : `<div class="imo-capa-placeholder" onclick="openImovelFicha(${i.id})">🏠</div>`}
               <div>
-                <div style="font-weight:600"><span class="filtro-click" onclick="_filtrarPor('imo-search',${JSON.stringify(i.nome)},renderImoveis)" title="Filtrar por este imóvel">${i.nome}</span></div>
+                <div style="font-weight:600"><span class="filtro-click" onclick="_filtrarPor('imo-search',${JSON.stringify(i.nome)},renderImoveis)" title="Filtrar">${i.nome}</span></div>
                 <div style="font-size:11px;color:var(--gray-400)">${i.tipo || 'Tipo não definido'}</div>
               </div>
             </div>
           </td>
-          <td>${i.bairro ? `${i.bairro},` : ''} <span class="filtro-click" onclick="_filtrarPor('imo-search',${JSON.stringify(i.cidade||'')},renderImoveis)" title="Filtrar por esta cidade">${i.cidade || '—'}</span> - ${i.uf || ''}</td>
+          <td>${predio ? `<span style="font-size:13px">🏢 ${predio.nome}</span>` : `<span style="color:var(--gray-300);font-size:12px">—</span>`}</td>
           <td><strong>${fmt(i.valorAluguel)}</strong>${i.taxasExtras > 0 ? `<div style="font-size:11px;color:var(--gray-400)">+ ${fmt(i.taxasExtras)} taxas</div>` : ''}</td>
           <td><span class="badge ${i.status === 'OCUPADO' ? 'badge-green' : i.status === 'EM MANUTENÇÃO' ? 'badge-yellow' : 'badge-blue'}">${i.status}</span></td>
           <td>${fotos > 0 ? `<span class="badge badge-blue">📷 ${fotos}</span>` : '<span style="color:var(--gray-300);font-size:12px">Sem fotos</span>'}</td>
@@ -1668,13 +1789,21 @@ function openImovel(id = null) {
   const form  = document.getElementById('form-imovel');
   form.reset();
   form.dataset.id = id || '';
-  document.getElementById('modal-imo-title').textContent = id ? 'Editar Imóvel' : 'Novo Imóvel';
+  document.getElementById('modal-imo-title').textContent = id ? 'Editar Unidade' : 'Nova Unidade';
+  // Popula select de prédio
+  const selPredio = form.elements['predioId'];
+  if (selPredio) {
+    selPredio.innerHTML = '<option value="">Selecione o prédio...</option>' +
+      (DB.predios || []).map(p => `<option value="${p.id}">${p.nome}</option>`).join('');
+    if (!id && _predioFiltro) selPredio.value = _predioFiltro;
+  }
   form.tipo.innerHTML = '<option value="">Selecione...</option>' +
     DB.config.tiposImovel.map(t => `<option value="${t}">${t}</option>`).join('');
   form.status.innerHTML = DB.config.statusImovel.map(s => `<option value="${s}">${s}</option>`).join('');
   if (!id) form.status.value = 'DISPONÍVEL';
   if (id) {
     const i = DB.imoveis.find(x => x.id === id);
+    if (selPredio && i.predioId) selPredio.value = i.predioId;
     ['nome','endereco','bairro','cidade','uf','cep','tipo','medidor','andar',
      'valorAluguel','taxaAgua','taxaManutencao','taxasExtras','status','observacoes'].forEach(k => {
       if (form[k]) form[k].value = i[k] ?? '';
@@ -1715,6 +1844,7 @@ function saveImovel() {
     taxaManutencao:  parseFloat(form.taxaManutencao.value)  || 0,
     taxasExtras:     parseFloat(form.taxasExtras.value)     || 0,
     total:        (parseFloat(form.valorAluguel.value) || 0) + (parseFloat(form.taxasExtras.value) || 0),
+    predioId:     parseInt(form.elements['predioId']?.value) || null,
     tipoEnergia:  form.querySelector('input[name="tipoEnergia"]:checked')?.value || 'solar',
     valorKwh:     parseFloat(form.elements['valorKwh']?.value) || 0,
     status:       form.status.value,

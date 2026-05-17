@@ -225,12 +225,21 @@
 
     <!-- ══ IMÓVEIS ══ -->
     <div id="page-imoveis" class="page">
+      <!-- PRÉDIOS -->
+      <div class="table-wrapper" style="margin-bottom:16px">
+        <div class="table-header">
+          <h3>Prédios</h3>
+          <button class="btn btn-primary" id="btn-criar-predio" onclick="openPredio()">+ Novo Prédio</button>
+        </div>
+        <div id="predios-grid" style="display:flex;flex-wrap:wrap;gap:12px;padding:8px 0 4px;min-height:60px"></div>
+      </div>
+      <!-- UNIDADES -->
       <div class="table-wrapper">
         <div class="table-header">
-          <h3>Imóveis Cadastrados</h3>
+          <h3 id="imo-section-title">Todas as Unidades</h3>
           <div style="display:flex;gap:8px;align-items:center">
-            <input class="search-box" id="imo-search" placeholder="Buscar imóvel..." oninput="renderImoveis()">
-            <button class="btn btn-primary" id="btn-criar-imoveis" onclick="openImovel()">+ Novo Imóvel</button>
+            <input class="search-box" id="imo-search" placeholder="Buscar unidade..." oninput="renderImoveis()">
+            <button class="btn btn-primary" id="btn-criar-imoveis" onclick="openImovel()">+ Nova Unidade</button>
           </div>
         </div>
         <div class="filter-bar" id="imo-filter-bar">
@@ -242,7 +251,7 @@
         </div>
         <table>
           <thead id="imo-thead">
-            <tr><th>Imóvel</th><th>Localização</th><th>Aluguel</th><th>Status</th><th>Fotos</th><th>Ações</th></tr>
+            <tr><th>Unidade</th><th>Prédio</th><th>Aluguel</th><th>Status</th><th>Fotos</th><th>Ações</th></tr>
           </thead>
           <tbody id="imo-tbody"></tbody>
         </table>
@@ -824,7 +833,13 @@
     </div>
     <div class="modal-body">
       <form id="form-imovel">
-        <div class="form-section-label">Dados do Imóvel</div>
+        <div class="form-group" style="margin-bottom:16px">
+          <label>Prédio *</label>
+          <select name="predioId" id="imo-predio-select" onchange="preencherEnderecoPredio()" required>
+            <option value="">Selecione o prédio...</option>
+          </select>
+        </div>
+        <div class="form-section-label">Dados da Unidade</div>
         <div class="form-grid">
           <div class="form-group form-col-2">
             <label>Nome do Imóvel *</label>
@@ -926,6 +941,54 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-imovel')">Cancelar</button>
       <button class="btn btn-primary" onclick="saveImovel()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL PRÉDIO ══ -->
+<div class="modal-overlay" id="modal-predio">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-predio-title">Prédio</h3>
+      <button class="modal-close" onclick="closeModal('modal-predio')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-predio">
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Nome do Prédio *</label>
+            <input name="nome" type="text" placeholder="Ex: Predio Sede, Brotas..." required>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Endereço</label>
+            <input name="endereco" type="text">
+          </div>
+          <div class="form-group">
+            <label>Bairro</label>
+            <input name="bairro" type="text">
+          </div>
+          <div class="form-group">
+            <label>Cidade</label>
+            <input name="cidade" type="text">
+          </div>
+          <div class="form-group">
+            <label>UF</label>
+            <input name="uf" type="text" maxlength="2">
+          </div>
+          <div class="form-group">
+            <label>CEP</label>
+            <input name="cep" type="text">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Observações</label>
+            <textarea name="observacoes"></textarea>
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-predio')">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePredio()">Salvar</button>
     </div>
   </div>
 </div>
