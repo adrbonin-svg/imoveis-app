@@ -2384,13 +2384,14 @@ function gerarParcelasContrato(c) {
   const prazo = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth());
   if (prazo <= 0) return 0;
 
-  // Fator pro-rata da 1ª parcela: dias restantes do mês de início / total de dias do mês
+  // Fator pro-rata da 1ª parcela: dias de dataInicio até dataPrimeiraCobranca (inclusive) / 30
   let fatorPrimeira = 1;
+  let diasProRata = 0;
   if (c.dataPrimeiraCobranca && c.dataInicio) {
-    const dInicio = new Date(c.dataInicio + 'T12:00:00');
-    const diasNoMes = new Date(dInicio.getFullYear(), dInicio.getMonth() + 1, 0).getDate();
-    const diasRestantes = diasNoMes - dInicio.getDate() + 1;
-    fatorPrimeira = _round2(diasRestantes / diasNoMes);
+    const dInicio   = new Date(c.dataInicio          + 'T12:00:00');
+    const dPrimeira = new Date(c.dataPrimeiraCobranca + 'T12:00:00');
+    diasProRata = Math.round((dPrimeira - dInicio) / 86400000) + 1;
+    fatorPrimeira = _round2(diasProRata / 30);
   }
 
   for (let i = 0; i < prazo; i++) {
@@ -2429,7 +2430,7 @@ function gerarParcelasContrato(c) {
       totalGeral:      _round2(valorContrato + consumoAgua + taxaManutencao + taxasExtras),
       valorRecebido:   0,
       observacoes:     i === 0 && c.dataPrimeiraCobranca
-        ? `Pro-rata: ${Math.round(fatorPrimeira * 100)}% (${new Date(c.dataInicio + 'T12:00:00').getDate()}/${new Date(c.dataInicio + 'T12:00:00').toLocaleString('pt-BR',{month:'long'})})`
+        ? `Pro-rata: ${diasProRata} dias (${fmtDate(c.dataInicio)} a ${fmtDate(c.dataPrimeiraCobranca)}) — ${Math.round(fatorPrimeira * 100)}% do mês`
         : '',
       gerado:          true,
     });
