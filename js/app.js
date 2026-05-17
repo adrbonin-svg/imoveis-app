@@ -2370,6 +2370,22 @@ function saveContrato() {
 // Arredonda para 2 casas
 const _round2 = v => Math.round(v * 100) / 100;
 
+// Monta texto de observação detalhado para parcela pro-rata
+function _obsProRata(c, diasProRata, fator, valorContrato, consumoAgua, taxaManutencao, taxasExtras) {
+  const linhas = [
+    `COBRANÇA PROPORCIONAL (PRO-RATA)`,
+    `Período: ${fmtDate(c.dataInicio)} a ${fmtDate(c.dataPrimeiraCobranca)} (${diasProRata} dias)`,
+    ``,
+    `Detalhamento:`,
+  ];
+  if (c.valorMensal > 0)    linhas.push(`  Aluguel mensal:    ${fmt(c.valorMensal)} ÷ 30 × ${diasProRata} dias = ${fmt(valorContrato)}`);
+  if (c.taxaAgua > 0)       linhas.push(`  Taxa de água:      ${fmt(c.taxaAgua)} ÷ 30 × ${diasProRata} dias = ${fmt(consumoAgua)}`);
+  if (c.taxaManutencao > 0) linhas.push(`  Taxa manutenção:   ${fmt(c.taxaManutencao)} ÷ 30 × ${diasProRata} dias = ${fmt(taxaManutencao)}`);
+  if (c.taxasExtras > 0)    linhas.push(`  Taxas extras:      ${fmt(c.taxasExtras)} ÷ 30 × ${diasProRata} dias = ${fmt(taxasExtras)}`);
+  linhas.push(``, `Total a pagar: ${fmt(_round2(valorContrato + consumoAgua + taxaManutencao + taxasExtras))}`);
+  return linhas.join('\n');
+}
+
 // Gera um registro financeiro por mês de vigência do contrato
 function gerarParcelasContrato(c) {
   if (!c.dataInicio || !c.dataTermino) return 0;
@@ -2430,7 +2446,7 @@ function gerarParcelasContrato(c) {
       totalGeral:      _round2(valorContrato + consumoAgua + taxaManutencao + taxasExtras),
       valorRecebido:   0,
       observacoes:     i === 0 && c.dataPrimeiraCobranca
-        ? `Pro-rata: ${diasProRata} dias (${fmtDate(c.dataInicio)} a ${fmtDate(c.dataPrimeiraCobranca)}) — ${Math.round(fatorPrimeira * 100)}% do mês`
+        ? _obsProRata(c, diasProRata, fatorPrimeira, valorContrato, consumoAgua, taxaManutencao, taxasExtras)
         : '',
       gerado:          true,
     });
