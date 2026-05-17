@@ -1476,6 +1476,65 @@ function resetarSenhaInquilino(userId) {
   toast(`Acesso resetado — usuário: ${cpfLimpo} · senha: ${cpfLimpo}`, 'success');
 }
 
+// Abre modal para criar acesso manualmente para inquilino sem perfil
+function openCriarAcessoInquilino() {
+  const semAcesso = DB.inquilinos.filter(i =>
+    !DB.usuarios.some(u => u.perfil === 'inquilino' && u.inquilinoId === i.id && u.ativo)
+  );
+  const sel = document.getElementById('criar-acesso-inq-select');
+  const info = document.getElementById('criar-acesso-inq-info');
+  sel.innerHTML = '<option value="">— Selecione —</option>' +
+    semAcesso.map(i => {
+      const cpf = (i.cpf || '').replace(/\D/g, '');
+      return `<option value="${i.id}" data-cpf="${cpf}">${i.nome}${cpf ? ' · CPF: ' + i.cpf : ' (sem CPF)'}</option>`;
+    }).join('');
+  info.textContent = '';
+  if (semAcesso.length === 0) {
+    sel.innerHTML = '<option value="">Todos os inquilinos já possuem acesso ativo</option>';
+  }
+  sel.onchange = () => {
+    const opt = sel.options[sel.selectedIndex];
+    const cpf = opt?.dataset?.cpf;
+    info.textContent = cpf ? `Login e senha serão: ${cpf}` : '';
+  };
+  document.getElementById('modal-criar-acesso-inq').classList.add('open');
+}
+
+function salvarAcessoInquilino() {
+  const sel = document.getElementById('criar-acesso-inq-select');
+  const inqId = parseInt(sel.value);
+  if (!inqId) { toast('Selecione um inquilino', 'error'); return; }
+  const inq = DB.inquilinos.find(x => x.id === inqId);
+  if (!inq) return;
+  const cpfLimpo = (inq.cpf || '').replace(/\D/g, '');
+  if (!cpfLimpo) {
+    toast('Este inquilino não possui CPF cadastrado. Edite o cadastro e preencha o CPF primeiro.', 'error');
+    return;
+  }
+  const jaExiste = DB.usuarios.find(u => u.perfil === 'inquilino' && u.inquilinoId === inqId);
+  if (jaExiste) {
+    jaExiste.usuario = cpfLimpo;
+    jaExiste.senha   = cpfLimpo;
+    jaExiste.ativo   = true;
+    toast(`Acesso reativado — usuário: ${cpfLimpo} · senha: ${cpfLimpo}`, 'success');
+  } else {
+    DB.usuarios.push({
+      id:          nextId(DB.usuarios),
+      nome:        inq.nome,
+      usuario:     cpfLimpo,
+      senha:       cpfLimpo,
+      perfil:      'inquilino',
+      inquilinoId: inqId,
+      permissoes:  { portal: { ver: true } },
+      ativo:       true,
+    });
+    toast(`Acesso criado — usuário: ${cpfLimpo} · senha: ${cpfLimpo}`, 'success');
+  }
+  saveData();
+  closeModal('modal-criar-acesso-inq');
+  renderUsuarios();
+}
+
 // ── IMÓVEIS ────────────────────────────────────────────
 let _imoFotosPendentes = [];
 let _predioFiltro = null;
