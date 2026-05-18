@@ -323,11 +323,21 @@ CPF:`,
 
 // Persistência no localStorage + backup no servidor
 function saveData() {
-  localStorage.setItem('imoveis_db', JSON.stringify(DB));
+  const json = JSON.stringify(DB);
+  try {
+    localStorage.setItem('imoveis_db', json);
+  } catch (e) {
+    if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
+      setTimeout(() => toast(
+        'Armazenamento local cheio — dados salvos apenas no servidor. Considere remover documentos antigos.',
+        'error'
+      ), 0);
+    }
+  }
   fetch('/api/db', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(DB),
+    body: json,
   }).catch(() => {});
 }
 

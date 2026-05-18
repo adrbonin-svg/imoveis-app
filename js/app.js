@@ -1395,16 +1395,20 @@ function saveInquilino() {
     _fieldError('inq-campo-nome', 'Nome é obrigatório');
     return;
   }
-  if (!cpfLimpo) {
+  if (cpfLimpo) {
+    // Valida formato somente se o CPF foi preenchido
+    if (tipoPessoa === 'juridica') {
+      if (!_validarCNPJ(cpfLimpo)) { _fieldError('inq-campo-cpf', 'CNPJ inválido — verifique os dígitos'); return; }
+    } else {
+      if (!_validarCPF(cpfLimpo)) { _fieldError('inq-campo-cpf', 'CPF inválido — verifique os dígitos'); return; }
+    }
+  } else if (!id) {
+    // Novo inquilino: CPF é obrigatório
     _fieldError('inq-campo-cpf', tipoPessoa === 'juridica' ? 'CNPJ é obrigatório' : 'CPF é obrigatório');
     return;
   }
-  if (tipoPessoa === 'juridica') {
-    if (!_validarCNPJ(cpfLimpo)) { _fieldError('inq-campo-cpf', 'CNPJ inválido — verifique os dígitos'); return; }
-  } else {
-    if (!_validarCPF(cpfLimpo)) { _fieldError('inq-campo-cpf', 'CPF inválido — verifique os dígitos'); return; }
-  }
-  if (!celLimpo) {
+  if (!celLimpo && !id) {
+    // Novo inquilino: celular é obrigatório
     _fieldError('inq-campo-celular', 'Celular é obrigatório');
     return;
   }
