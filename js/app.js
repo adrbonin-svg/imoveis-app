@@ -2718,6 +2718,30 @@ function gerarContrato(id) {
       );
       return linhas.join('\n\n');
     })(),
+    // Co-locatário 2
+    '{{LOCATARIO2_NOME}}':         coInqs[0]?.nome         || '',
+    '{{LOCATARIO2_ESTADO_CIVIL}}': coInqs[0]?.estadoCivil  || '',
+    '{{LOCATARIO2_PROFISSAO}}':    coInqs[0]?.profissao    || '',
+    '{{LOCATARIO2_RG}}':           coInqs[0]?.rg           || '',
+    '{{LOCATARIO2_CPF}}':          coInqs[0]?.cpf          || '',
+    '{{LOCATARIO2_EMAIL}}':        coInqs[0]?.email        || '',
+    '{{LOCATARIO2_TELEFONE}}':     coInqs[0]?.celular || coInqs[0]?.telefone || '',
+    // Co-locatário 3
+    '{{LOCATARIO3_NOME}}':         coInqs[1]?.nome         || '',
+    '{{LOCATARIO3_ESTADO_CIVIL}}': coInqs[1]?.estadoCivil  || '',
+    '{{LOCATARIO3_PROFISSAO}}':    coInqs[1]?.profissao    || '',
+    '{{LOCATARIO3_RG}}':           coInqs[1]?.rg           || '',
+    '{{LOCATARIO3_CPF}}':          coInqs[1]?.cpf          || '',
+    '{{LOCATARIO3_EMAIL}}':        coInqs[1]?.email        || '',
+    '{{LOCATARIO3_TELEFONE}}':     coInqs[1]?.celular || coInqs[1]?.telefone || '',
+    // Co-locatário 4
+    '{{LOCATARIO4_NOME}}':         coInqs[2]?.nome         || '',
+    '{{LOCATARIO4_ESTADO_CIVIL}}': coInqs[2]?.estadoCivil  || '',
+    '{{LOCATARIO4_PROFISSAO}}':    coInqs[2]?.profissao    || '',
+    '{{LOCATARIO4_RG}}':           coInqs[2]?.rg           || '',
+    '{{LOCATARIO4_CPF}}':          coInqs[2]?.cpf          || '',
+    '{{LOCATARIO4_EMAIL}}':        coInqs[2]?.email        || '',
+    '{{LOCATARIO4_TELEFONE}}':     coInqs[2]?.celular || coInqs[2]?.telefone || '',
   };
 
   let texto = template;
@@ -2810,6 +2834,31 @@ const CT_CAMPOS = {
     ['{{CONTRATO_TAXA_MANUTENCAO_EXTENSO}}',  'Taxa de manutenção predial por extenso'],
     ['{{CONTRATO_ENTRADA_TOTAL}}',       'Total na entrada (R$)'],
     ['{{CONTRATO_ENTRADA_TOTAL_EXTENSO}}','Total na entrada por extenso'],
+  ],
+  'Co-Locatários': [
+    ['{{CO_LOCATARIOS_BLOCO}}',     'Bloco completo de todos os co-locatários (nome, CPF, RG, profissão...)'],
+    ['{{LOCATARIOS_ASSINATURAS}}',  'Linhas de assinatura de todos os locatários (principal + co-locatários)'],
+    ['{{LOCATARIO2_NOME}}',         'Co-locatário 2 — Nome'],
+    ['{{LOCATARIO2_ESTADO_CIVIL}}', 'Co-locatário 2 — Estado civil'],
+    ['{{LOCATARIO2_PROFISSAO}}',    'Co-locatário 2 — Profissão'],
+    ['{{LOCATARIO2_RG}}',           'Co-locatário 2 — RG'],
+    ['{{LOCATARIO2_CPF}}',          'Co-locatário 2 — CPF'],
+    ['{{LOCATARIO2_EMAIL}}',        'Co-locatário 2 — E-mail'],
+    ['{{LOCATARIO2_TELEFONE}}',     'Co-locatário 2 — Telefone'],
+    ['{{LOCATARIO3_NOME}}',         'Co-locatário 3 — Nome'],
+    ['{{LOCATARIO3_ESTADO_CIVIL}}', 'Co-locatário 3 — Estado civil'],
+    ['{{LOCATARIO3_PROFISSAO}}',    'Co-locatário 3 — Profissão'],
+    ['{{LOCATARIO3_RG}}',           'Co-locatário 3 — RG'],
+    ['{{LOCATARIO3_CPF}}',          'Co-locatário 3 — CPF'],
+    ['{{LOCATARIO3_EMAIL}}',        'Co-locatário 3 — E-mail'],
+    ['{{LOCATARIO3_TELEFONE}}',     'Co-locatário 3 — Telefone'],
+    ['{{LOCATARIO4_NOME}}',         'Co-locatário 4 — Nome'],
+    ['{{LOCATARIO4_ESTADO_CIVIL}}', 'Co-locatário 4 — Estado civil'],
+    ['{{LOCATARIO4_PROFISSAO}}',    'Co-locatário 4 — Profissão'],
+    ['{{LOCATARIO4_RG}}',           'Co-locatário 4 — RG'],
+    ['{{LOCATARIO4_CPF}}',          'Co-locatário 4 — CPF'],
+    ['{{LOCATARIO4_EMAIL}}',        'Co-locatário 4 — E-mail'],
+    ['{{LOCATARIO4_TELEFONE}}',     'Co-locatário 4 — Telefone'],
   ],
   'Locador (Proprietário)': [
     ['{{LOCADOR_NOME}}',       'Nome'],
