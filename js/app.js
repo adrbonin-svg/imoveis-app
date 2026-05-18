@@ -3084,7 +3084,7 @@ function renderFinanceiro() {
         <td>
           <strong style="color:var(--success)">${fmt(f.valorRecebido)}</strong>
           ${f.formaPagamento ? `<div style="font-size:11px;color:var(--gray-500);margin-top:2px">💳 ${f.formaPagamento}</div>` : ''}
-          ${f.comprovante    ? `<button class="btn btn-ghost btn-sm" style="margin-top:4px;font-size:10px" onclick="verComprovante(${f.id})">🧾 Comprovante</button>` : ''}
+          ${(() => { const cs = _getComprovantes(f); return cs.length > 0 ? `<button class="btn btn-ghost btn-sm" style="margin-top:4px;font-size:10px" onclick="verComprovantes(${f.id})">🧾 ${cs.length > 1 ? cs.length + ' comprovantes' : 'Comprovante'}</button>` : ''; })()}
         </td>
         <td>${(() => {
           const rec = f.valorRecebido || 0;
@@ -3330,14 +3330,21 @@ function deleteFinanceiro(id) {
 
 // ── BAIXA MANUAL ───────────────────────────────────────
 let _baixaFinId = null;
-let _baixaComprovantePendente = null;
-let _finComprovantePendente   = null;
+let _baixaComprovauntesPendentes = [];
+let _finComprovantePendente = null;
+
+// Compatibilidade: retorna array de comprovantes de um registro financeiro
+function _getComprovantes(f) {
+  if (Array.isArray(f?.comprovantes) && f.comprovantes.length > 0) return f.comprovantes;
+  if (f?.comprovante) return [f.comprovante];
+  return [];
+}
 
 function openBaixa(id) {
   _baixaFinId = id;
-  _baixaComprovantePendente = null;
   const f = DB.financeiro.find(x => x.id === id);
   if (!f) return;
+  _baixaComprovauntesPendentes = [..._getComprovantes(f)];
   const form = document.getElementById('form-baixa');
   form.reset();
   document.getElementById('modal-baixa-info').innerHTML = `
@@ -3345,8 +3352,8 @@ function openBaixa(id) {
     <div><span style="color:var(--gray-400)">Inquilino</span><br><strong>${f.inquilino || '—'}</strong></div>
     <div><span style="color:var(--gray-400)">Total a receber</span><br><strong style="color:var(--primary)">${fmt(f.totalGeral)}</strong></div>
     <div><span style="color:var(--gray-400)">Já recebido</span><br><strong style="color:var(--success)">${fmt(f.valorRecebido || 0)}</strong></div>`;
-  form.elements['dataBaixa'].value      = today();
-  form.elements['valorRecebido'].value  = (f.totalGeral || 0).toFixed(2);
+  form.elements['dataBaixa'].value     = today();
+  form.elements['valorRecebido'].value = (f.totalGeral || 0).toFixed(2);
   if (f.formaPagamento) form.elements['formaPagamento'].value = f.formaPagamento;
   if (f.dataBaixa)      form.elements['dataBaixa'].value      = f.dataBaixa;
   _renderBaixaComprovante();
@@ -3356,20 +3363,35 @@ function openBaixa(id) {
 function _renderBaixaComprovante() {
   const zone = document.getElementById('baixa-comprovante-zone');
   if (!zone) return;
-  const f = _baixaFinId ? DB.financeiro.find(x => x.id === _baixaFinId) : null;
-  const comp = _baixaComprovantePendente || f?.comprovante;
-  if (comp) {
+  const list = _baixaComprovauntesPendentes;
+  let html = '<div style="display:flex;flex-direction:column;gap:4px;width:100%">';
+  list.forEach((comp, idx) => {
     const isPdf = (comp.tipo || '').includes('pdf') || (comp.dados || '').startsWith('data:application/pdf');
-    zone.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--gray-50);border-radius:8px;width:100%">
-        <span style="font-size:18px">${isPdf ? '📄' : '🖼️'}</span>
-        <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${comp.nome}</span>
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('baixa-file-input').click()">Trocar</button>
-        <button class="btn btn-danger btn-sm" onclick="_baixaComprovantePendente=null;_renderBaixaComprovante()">✕</button>
+    html += `
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--gray-50);border-radius:8px">
+        <span style="font-size:16px">${isPdf ? '📄' : '🖼️'}</span>
+        <span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${comp.nome}">${comp.nome}</span>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:3px 8px" onclick="_baixaVerComp(${idx})">Ver</button>
+        <button class="btn btn-danger btn-sm" style="font-size:10px;padding:3px 8px" onclick="_baixaRemoveComp(${idx})">✕</button>
       </div>`;
-  } else {
-    zone.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="document.getElementById('baixa-file-input').click()">📎 Anexar comprovante</button>`;
-  }
+  });
+  html += `</div><button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="document.getElementById('baixa-file-input').click()">📎 Adicionar comprovante</button>`;
+  zone.innerHTML = html;
+}
+
+function _baixaVerComp(idx) {
+  const comp = _baixaComprovauntesPendentes[idx];
+  if (!comp) return;
+  const isPdf = (comp.tipo || '').includes('pdf') || (comp.dados || '').startsWith('data:application/pdf');
+  const w = window.open();
+  w.document.write(isPdf
+    ? `<iframe src="${comp.dados}" style="width:100%;height:100vh;border:none"></iframe>`
+    : `<img src="${comp.dados}" style="max-width:100%;display:block;margin:auto">`);
+}
+
+function _baixaRemoveComp(idx) {
+  _baixaComprovauntesPendentes.splice(idx, 1);
+  _renderBaixaComprovante();
 }
 
 function handleBaixaFile(input) {
@@ -3378,7 +3400,7 @@ function handleBaixaFile(input) {
   if (file.size > 10 * 1024 * 1024) { toast('Arquivo muito grande (máx 10 MB)', 'error'); return; }
   const reader = new FileReader();
   reader.onload = e => {
-    _baixaComprovantePendente = { nome: file.name, tipo: file.type, dados: e.target.result };
+    _baixaComprovauntesPendentes.push({ nome: file.name, tipo: file.type, dados: e.target.result });
     _renderBaixaComprovante();
   };
   reader.readAsDataURL(file);
@@ -3392,8 +3414,8 @@ function salvarBaixa() {
   const formaPagamento = form.elements['formaPagamento'].value;
   const valorRecebido  = parseFloat(form.elements['valorRecebido'].value) || 0;
   const obs            = form.elements['observacoesBaixa'].value.trim();
-  if (!dataBaixa)      { toast('Informe a data do pagamento',     'error'); return; }
-  if (!formaPagamento) { toast('Informe a forma de pagamento',    'error'); return; }
+  if (!dataBaixa)      { toast('Informe a data do pagamento',  'error'); return; }
+  if (!formaPagamento) { toast('Informe a forma de pagamento', 'error'); return; }
   const idx = DB.financeiro.findIndex(x => x.id === _baixaFinId);
   if (idx < 0) return;
   const f = DB.financeiro[idx];
@@ -3403,7 +3425,8 @@ function salvarBaixa() {
     dataBaixa,
     formaPagamento,
     observacoes:  obs || f.observacoes || '',
-    comprovante:  _baixaComprovantePendente || f.comprovante || null,
+    comprovantes: [..._baixaComprovauntesPendentes],
+    comprovante:  null, // limpa campo antigo
     baixaManual:  true,
   };
   saveData();
@@ -3413,18 +3436,29 @@ function salvarBaixa() {
   toast('Pagamento confirmado!', 'success');
 }
 
-function verComprovante(id) {
+// Abre visualizador de comprovantes (suporta múltiplos e formato antigo)
+function verComprovantes(id) {
   const f = DB.financeiro.find(x => x.id === id);
-  const comp = f?.comprovante;
-  if (!comp) return;
-  const isPdf = (comp.tipo || '').includes('pdf');
-  if (isPdf) {
+  const list = _getComprovantes(f);
+  if (!list.length) return;
+  if (list.length === 1) {
+    const comp = list[0];
+    const isPdf = (comp.tipo || '').includes('pdf') || (comp.dados || '').startsWith('data:application/pdf');
     const w = window.open();
-    w.document.write(`<iframe src="${comp.dados}" style="width:100%;height:100vh;border:none"></iframe>`);
-  } else {
-    const w = window.open();
-    w.document.write(`<img src="${comp.dados}" style="max-width:100%">`);
+    w.document.write(isPdf
+      ? `<iframe src="${comp.dados}" style="width:100%;height:100vh;border:none"></iframe>`
+      : `<img src="${comp.dados}" style="max-width:100%;display:block;margin:auto">`);
+    return;
   }
+  // Múltiplos: abre galeria simples em nova janela
+  const itens = list.map((comp, i) => {
+    const isPdf = (comp.tipo || '').includes('pdf') || (comp.dados || '').startsWith('data:application/pdf');
+    return isPdf
+      ? `<div style="margin-bottom:24px"><b>${i+1}. ${comp.nome}</b><br><iframe src="${comp.dados}" style="width:100%;height:500px;border:1px solid #ccc;margin-top:6px;border-radius:6px"></iframe></div>`
+      : `<div style="margin-bottom:24px"><b>${i+1}. ${comp.nome}</b><br><img src="${comp.dados}" style="max-width:100%;margin-top:6px;border-radius:6px;border:1px solid #ccc"></div>`;
+  }).join('');
+  const w = window.open();
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Comprovantes</title><style>body{font-family:sans-serif;padding:24px;max-width:900px;margin:auto}</style></head><body><h2>Comprovantes de Pagamento</h2>${itens}</body></html>`);
 }
 
 function handleFinComprovanteFile(input) {
