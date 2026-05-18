@@ -2181,7 +2181,52 @@ function removeContratoArquivo(id) {
   toast('Arquivo removido');
 }
 
+// ── Co-locatários do contrato ──────────────────────────
+let _ctCoInquilinos = []; // [{ id, nome }]
+
+function _ctRenderCoInquilinos() {
+  const lista = document.getElementById('ct-coinq-lista');
+  if (!lista) return;
+  if (_ctCoInquilinos.length === 0) {
+    lista.innerHTML = '<span class="coinq-empty">Nenhum co-locatário adicionado</span>';
+    return;
+  }
+  lista.innerHTML = _ctCoInquilinos.map((ci, idx) => `
+    <span class="coinq-chip">👤 ${ci.nome}
+      <button type="button" onclick="ctRemoveCoInquilino(${idx})" title="Remover">✕</button>
+    </span>`).join('');
+}
+
+function ctAddCoInquilino() {
+  const sel = document.getElementById('ct-coinq-sel');
+  const id  = parseInt(sel.value);
+  if (!id) return;
+  if (_ctCoInquilinos.some(c => c.id === id)) { toast('Já adicionado', 'error'); return; }
+  const inqPrincipalId = parseInt(document.getElementById('form-contrato').inquilino.value);
+  if (id === inqPrincipalId) { toast('Este inquilino já é o locatário principal', 'error'); return; }
+  const inq = DB.inquilinos.find(i => i.id === id);
+  if (!inq) return;
+  _ctCoInquilinos.push({ id: inq.id, nome: inq.nome });
+  sel.value = '';
+  _ctRenderCoInquilinos();
+}
+
+function ctRemoveCoInquilino(idx) {
+  _ctCoInquilinos.splice(idx, 1);
+  _ctRenderCoInquilinos();
+}
+
+function _ctPopularSelCoInq(excluirId = null) {
+  const sel = document.getElementById('ct-coinq-sel');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Selecione um inquilino para adicionar...</option>' +
+    DB.inquilinos
+      .filter(i => i.id !== excluirId)
+      .map(i => `<option value="${i.id}">${i.nome}</option>`).join('');
+}
+
 function openContrato(id = null) {
+  _ctCoInquilinos = [];
   _contratoArquivoPendente = null;
   const modal = document.getElementById('modal-contrato');
   const form = document.getElementById('form-contrato');
@@ -2196,6 +2241,8 @@ function openContrato(id = null) {
   form.inquilino.innerHTML = '<option value="">Selecione...</option>' +
     DB.inquilinos.map(i => `<option value="${i.id}">${i.nome}</option>`).join('');
   form.status.innerHTML = DB.config.statusContrato.map(s => `<option value="${s}">${s}</option>`).join('');
+  _ctPopularSelCoInq();
+  _ctRenderCoInquilinos();
 
   const fileZone = document.getElementById('ct-file-zone');
   const fileInput = document.getElementById('ct-file-input');
@@ -2238,6 +2285,10 @@ function openContrato(id = null) {
     form.elements['taxasExtras'].value             = c.taxasExtras     || '';
     updateCaucaoInfo();
     updateFileZone(c.arquivo || null);
+    // Carrega co-locatários salvos
+    _ctCoInquilinos = (c.coInquilinos || []).map(ci => ({ id: ci.id, nome: ci.nome }));
+    _ctRenderCoInquilinos();
+    _ctPopularSelCoInq(parseInt(form.inquilino.value) || null);
   } else {
     updateFileZone(null);
   }
@@ -2346,6 +2397,7 @@ function saveContrato() {
     dataContrato:          form.elements['dataContrato'].value,
     diaVencimento:         parseInt(form.elements['diaVencimento'].value)    || null,
     dataPrimeiraCobranca:  form.elements['dataPrimeiraCobranca'].value       || '',
+    coInquilinos:          [..._ctCoInquilinos],
     caucao:                parseFloat(form.elements['caucao'].value)              || 0,
     caucaoParcelas:         parseInt(form.elements['caucaoParcelas'].value)       || 1,
     caucaoFormaPagamento:  form.elements['caucaoFormaPagamento']?.value           || '',
@@ -2549,6 +2601,10 @@ function gerarContrato(id) {
   const inq = (c.inquilinoId ? DB.inquilinos.find(i => i.id === c.inquilinoId) : null)
            || DB.inquilinos.find(i => normNome(i.nome) === normNome(c.inquilino))
            || {};
+  // Co-locatários com dados completos do cadastro
+  const coInqs = (c.coInquilinos || []).map(ci =>
+    DB.inquilinos.find(i => i.id === ci.id) || { nome: ci.nome }
+  );
   if (!inq.id && c.inquilino) {
     toast(`Inquilino "${c.inquilino}" não encontrado no cadastro — verifique se o nome bate exatamente.`, 'error');
   }
@@ -2639,8 +2695,28 @@ function gerarContrato(id) {
     '{{CONTRATO_ENTRADA_TOTAL_EXTENSO}}': valorPorExtenso(entrada),
     '{{MORADORES_LISTA}}': (() => {
       const todos = [inq.nome || c.inquilino || ''];
+      coInqs.forEach(ci => { if (ci.nome) todos.push(ci.nome); });
       (inq.moradores || []).forEach(m => { if (m.nome) todos.push(m.nome); });
       return todos.filter(Boolean).join('\n');
+    })(),
+    '{{CO_LOCATARIOS_BLOCO}}': coInqs.length === 0 ? '' : coInqs.map((ci, idx) => {
+      const n = idx + 2;
+      return [
+        `LOCATÁRIO ${n}: ${ci.nome || ''}`,
+        ci.estadoCivil ? `Estado civil: ${ci.estadoCivil}` : '',
+        ci.profissao   ? `Profissão: ${ci.profissao}`       : '',
+        ci.rg          ? `RG: ${ci.rg}`                     : '',
+        ci.cpf         ? `CPF: ${ci.cpf}`                   : '',
+        ci.celular     ? `Celular: ${ci.celular}`            : '',
+        ci.email       ? `E-mail: ${ci.email}`               : '',
+      ].filter(Boolean).join('\n');
+    }).join('\n\n'),
+    '{{LOCATARIOS_ASSINATURAS}}': (() => {
+      const linhas = [`LOCATÁRIO _____________________________________\n${inq.nome || c.inquilino || ''}`];
+      coInqs.forEach((ci, idx) =>
+        linhas.push(`LOCATÁRIO ${idx + 2} _____________________________________\n${ci.nome || ''}`)
+      );
+      return linhas.join('\n\n');
     })(),
   };
 

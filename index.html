@@ -1296,8 +1296,18 @@
             <select name="imovel" onchange="preencherValoresImovel(this)"></select>
           </div>
           <div class="form-group form-col-2">
-            <label>Inquilino</label>
+            <label>Inquilino Principal</label>
             <select name="inquilino"></select>
+          </div>
+          <div class="form-group form-col-2" id="ct-coinq-section">
+            <label>Co-Locatários <small style="color:var(--gray-400);font-weight:400">(opcional — para contratos com mais de um inquilino)</small></label>
+            <div id="ct-coinq-lista" style="margin-bottom:6px"></div>
+            <div style="display:flex;gap:8px">
+              <select id="ct-coinq-sel" style="flex:1;padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px">
+                <option value="">Selecione um inquilino para adicionar...</option>
+              </select>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="ctAddCoInquilino()">+ Adicionar</button>
+            </div>
           </div>
           <div class="form-group">
             <label>Data Início</label>
