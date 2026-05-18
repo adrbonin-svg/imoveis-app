@@ -802,28 +802,29 @@
 
         </div>
         <button class="btn btn-primary" onclick="saveAsaasConfig()">💾 Salvar e Aplicar Configurações Asaas</button>
-      </div>
-    </div>
 
-    <!-- BACKUP E RECUPERAÇÃO -->
-    <div id="config-backup-section" style="margin-top:48px;padding-top:32px;border-top:2px solid var(--gray-100)">
-      <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">🗄️ Backup e Recuperação de Dados</h3>
-      <p style="font-size:13px;color:var(--gray-400);margin-bottom:16px">Se os dados sumidos da tela, use o botão abaixo para restaurar o último backup salvo no servidor.</p>
-      <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-        <div style="flex:1;min-width:220px">
-          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Restaurar do Servidor</div>
-          <div style="font-size:12px;color:var(--gray-400)">Busca os dados do MongoDB/backup do servidor e sobrescreve o armazenamento local.</div>
+        <!-- BACKUP E RECUPERAÇÃO -->
+        <div id="config-backup-section" style="margin-top:48px;padding-top:32px;border-top:2px solid var(--gray-100)">
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">🗄️ Backup e Recuperação de Dados</h3>
+          <p style="font-size:13px;color:var(--gray-400);margin-bottom:16px">Se os dados sumirem da tela, use o botão abaixo para restaurar o último backup salvo no servidor.</p>
+          <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+            <div style="flex:1;min-width:220px">
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px">Restaurar do Servidor</div>
+              <div style="font-size:12px;color:var(--gray-400)">Busca os dados do MongoDB/backup do servidor e sobrescreve o armazenamento local.</div>
+            </div>
+            <button class="btn btn-primary" onclick="restaurarDoServidor()">🔄 Restaurar Backup do Servidor</button>
+          </div>
+          <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:12px">
+            <div style="flex:1;min-width:220px">
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px">Forçar Sincronização</div>
+              <div style="font-size:12px;color:var(--gray-400)">Envia os dados atuais da tela para o servidor agora.</div>
+            </div>
+            <button class="btn btn-ghost" onclick="saveData();toast('Dados sincronizados com o servidor!','success')">☁️ Sincronizar com Servidor</button>
+          </div>
         </div>
-        <button class="btn btn-primary" onclick="restaurarDoServidor()">🔄 Restaurar Backup do Servidor</button>
-      </div>
-      <div class="card" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:12px">
-        <div style="flex:1;min-width:220px">
-          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Forçar Sincronização</div>
-          <div style="font-size:12px;color:var(--gray-400)">Envia os dados atuais da tela para o servidor agora.</div>
-        </div>
-        <button class="btn btn-ghost" onclick="saveData();toast('Dados sincronizados com o servidor!','success')">☁️ Sincronizar com Servidor</button>
-      </div>
-    </div>
+
+      </div><!-- /max-width:780px -->
+    </div><!-- /page-config -->
 
   </div><!-- /content -->
 </main>
