@@ -5198,6 +5198,8 @@ const CFG_LISTAS = [
 function renderConfig() {
   renderTodasListas();
   renderCamposExtrasConfig();
+  const backupSection = document.getElementById('config-backup-section');
+  if (backupSection) backupSection.style.display = (_currentUser?.perfil === 'inquilino') ? 'none' : '';
   const loc = DB.config.locador || {};
   ['nome','estadoCivil','profissao','rg','cpf','endereco','telefone','email'].forEach(k => {
     const el = document.getElementById('cfg-locador-'+k);
