@@ -341,71 +341,87 @@ function saveData() {
   }).catch(() => {});
 }
 
-function loadData() {
+// Aplica dados carregados (localStorage ou servidor) ao DB com migrações
+function _applyParsedData(parsed, persistLocalStorage) {
+  if (parsed.config) {
+    parsed.config = Object.assign({}, DB.config, parsed.config);
+    if (!parsed.config.modeloContrato)     parsed.config.modeloContrato     = DB.config.modeloContrato;
+    if (!parsed.config.locador)            parsed.config.locador            = DB.config.locador;
+    if (!parsed.config.camposExtras)       parsed.config.camposExtras       = DB.config.camposExtras;
+    if (!parsed.config.camposExtrasNextId) parsed.config.camposExtrasNextId = 1;
+    if (!parsed.config.asaas)             parsed.config.asaas              = DB.config.asaas;
+    if (parsed.config.asaas && parsed.config.asaas.nomeBeneficiario === undefined)
+      parsed.config.asaas.nomeBeneficiario = '';
+    if (!parsed.config.energia) parsed.config.energia = DB.config.energia;
+  }
+  Object.assign(DB, parsed);
+  if (!Array.isArray(DB.manutencaoPreventiva)) DB.manutencaoPreventiva = [];
+  if (!Array.isArray(DB.predios))              DB.predios = [];
+  if (Array.isArray(DB.imoveis))
+    DB.imoveis.forEach(im  => { if (!Array.isArray(im.checklistFotos))  im.checklistFotos  = []; });
+  if (Array.isArray(DB.inquilinos))
+    DB.inquilinos.forEach(inq => { if (!Array.isArray(inq.checklistFotos)) inq.checklistFotos = []; });
+  if (!Array.isArray(DB.usuarios) || DB.usuarios.length === 0)
+    DB.usuarios = [{ id: 1, nome: 'Administrador', usuario: 'admin', senha: 'admin', perfil: 'admin',
+      permissoes: ['dashboard','imoveis','inquilinos','contratos','financeiro','manutencao','relatorios','config','usuarios'], ativo: true }];
+  const oldAdm = DB.usuarios.find(u => u.usuario === 'adm' && u.senha === 'adm' && u.perfil === 'admin');
+  if (oldAdm) { oldAdm.usuario = 'admin'; oldAdm.senha = 'admin'; }
+
+  // Migração: inquilinoId em contratos
+  if (Array.isArray(DB.contratos) && Array.isArray(DB.inquilinos)) {
+    const norm = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    DB.contratos.forEach(c => {
+      if (!c.inquilinoId && c.inquilino) {
+        const match = DB.inquilinos.find(i => norm(i.nome) === norm(c.inquilino));
+        if (match) c.inquilinoId = match.id;
+      }
+    });
+  }
+  // Migração: totalGeral e baixaManual no financeiro
+  if (Array.isArray(DB.financeiro)) {
+    DB.financeiro.forEach(f => {
+      if (f.totalGeral == null)
+        f.totalGeral = (f.valorContrato||0)+(f.consumoAgua||0)+(f.taxaManutencao||0)
+                      +(f.taxasExtras||0)+(f.totalEnergia||0)+(f.valorMulta||0)+(f.valorMora||0);
+      if (f.baixaManual == null && (f.valorRecebido || 0) > 0) f.baixaManual = true;
+    });
+  }
+  if (persistLocalStorage) {
+    try { localStorage.setItem('imoveis_db', JSON.stringify(DB)); } catch(e) {}
+  }
+}
+
+// Promise resolvida quando os dados estiverem prontos (usada em _initApp)
+let _dataReadyResolve;
+const _dataReady = new Promise(resolve => { _dataReadyResolve = resolve; });
+
+async function loadData() {
+  // 1ª tentativa: localStorage
   const saved = localStorage.getItem('imoveis_db');
   if (saved) {
-    const parsed = JSON.parse(saved);
-    // Mescla config: preserva campos novos do padrão ausentes no localStorage
-    if (parsed.config) {
-      parsed.config = Object.assign({}, DB.config, parsed.config);
-      // Garante campos críticos que podem não existir em dados antigos
-      if (!parsed.config.modeloContrato)  parsed.config.modeloContrato  = DB.config.modeloContrato;
-      if (!parsed.config.locador)         parsed.config.locador         = DB.config.locador;
-      if (!parsed.config.camposExtras)    parsed.config.camposExtras    = DB.config.camposExtras;
-      if (!parsed.config.camposExtrasNextId) parsed.config.camposExtrasNextId = 1;
-      if (!parsed.config.asaas)           parsed.config.asaas           = DB.config.asaas;
-      if (parsed.config.asaas && parsed.config.asaas.nomeBeneficiario === undefined)
-        parsed.config.asaas.nomeBeneficiario = '';
-      if (!parsed.config.energia) parsed.config.energia = DB.config.energia;
-    }
-    Object.assign(DB, parsed);
-    if (!Array.isArray(DB.manutencaoPreventiva)) DB.manutencaoPreventiva = [];
-    if (!Array.isArray(DB.predios)) DB.predios = [];
-    // Garante campo checklistFotos em todos os imóveis
-    if (Array.isArray(DB.imoveis)) {
-      DB.imoveis.forEach(im => { if (!Array.isArray(im.checklistFotos)) im.checklistFotos = []; });
-    }
-    // Garante campo checklistFotos nos inquilinos
-    if (Array.isArray(DB.inquilinos)) {
-      DB.inquilinos.forEach(inq => { if (!Array.isArray(inq.checklistFotos)) inq.checklistFotos = []; });
-    }
-    if (!Array.isArray(DB.usuarios) || DB.usuarios.length === 0)
-      DB.usuarios = [{ id: 1, nome: 'Administrador', usuario: 'admin', senha: 'admin', perfil: 'admin', permissoes: ['dashboard','imoveis','inquilinos','contratos','financeiro','manutencao','relatorios','config','usuarios'], ativo: true }];
-    // Migra usuário padrão antigo (adm/adm) para admin/admin
-    const oldAdm = DB.usuarios.find(u => u.usuario === 'adm' && u.senha === 'adm' && u.perfil === 'admin');
-    if (oldAdm) { oldAdm.usuario = 'admin'; oldAdm.senha = 'admin'; localStorage.setItem('imoveis_db', JSON.stringify(DB)); }
-
-    // Migração: preenche inquilinoId em contratos que só têm o nome (comparação normalizada)
-    if (Array.isArray(DB.contratos) && Array.isArray(DB.inquilinos)) {
-      const norm = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-      let migrated = false;
-      DB.contratos.forEach(c => {
-        if (!c.inquilinoId && c.inquilino) {
-          const match = DB.inquilinos.find(i => norm(i.nome) === norm(c.inquilino));
-          if (match) { c.inquilinoId = match.id; migrated = true; }
-        }
-      });
-      if (migrated) saveData();
-    }
-
-    // Migração: calcula totalGeral para registros financeiros sem ele
-    // e marca baixaManual em registros que já tinham valorRecebido confirmado
-    if (Array.isArray(DB.financeiro)) {
-      let finMigrated = false;
-      DB.financeiro.forEach(f => {
-        if (f.totalGeral == null) {
-          f.totalGeral = (f.valorContrato||0) + (f.consumoAgua||0) + (f.taxaManutencao||0)
-                       + (f.taxasExtras||0) + (f.totalEnergia||0) + (f.valorMulta||0) + (f.valorMora||0);
-          finMigrated = true;
-        }
-        if (f.baixaManual == null && (f.valorRecebido || 0) > 0) {
-          f.baixaManual = true;
-          finMigrated = true;
-        }
-      });
-      if (finMigrated) saveData();
+    try {
+      _applyParsedData(JSON.parse(saved), false);
+      _dataReadyResolve();
+      return;
+    } catch (e) {
+      console.warn('[loadData] localStorage corrompido, tentando servidor...', e);
     }
   }
+
+  // 2ª tentativa: servidor (MongoDB / db.json)
+  try {
+    const res = await fetch('/api/db');
+    if (res.ok) {
+      const serverData = await res.json();
+      if (serverData && !serverData.error) {
+        _applyParsedData(serverData, true); // salva no localStorage ao recuperar
+        console.info('[loadData] Dados restaurados do servidor com sucesso.');
+      }
+    }
+  } catch (e) {
+    console.error('[loadData] Falha ao carregar dados do servidor:', e);
+  }
+  _dataReadyResolve();
 }
 
 function nextId(arr) {

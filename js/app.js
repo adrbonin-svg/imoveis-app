@@ -5982,14 +5982,38 @@ function _portalRenderBoletos(inq) {
   }).join('');
 }
 
+// ── BACKUP / RECUPERAÇÃO ────────────────────────────────
+async function restaurarDoServidor() {
+  if (!confirm_('Isso vai substituir os dados locais pelos dados do servidor. Continuar?')) return;
+  try {
+    const res = await fetch('/api/db');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const serverData = await res.json();
+    if (serverData.error) throw new Error(serverData.error);
+    _applyParsedData(serverData, true);
+    toast('Dados restaurados do servidor com sucesso!', 'success');
+    renderDashboard(); renderInquilinos(); renderImoveis(); renderContratos(); renderFinanceiro();
+  } catch (e) {
+    toast('Falha ao restaurar: ' + e.message, 'error');
+  }
+}
+
 // ── INIT ───────────────────────────────────────────────
-function _initApp() {
+async function _initApp() {
+  // Aguarda dados carregados (localStorage ou servidor)
+  const loadingEl = document.getElementById('app-loading');
+  if (loadingEl) loadingEl.style.display = 'flex';
+
+  await _dataReady;
+
+  if (loadingEl) loadingEl.style.display = 'none';
+
   document.querySelectorAll('.nav-item').forEach(el => {
     el.addEventListener('click', () => navigate(el.dataset.page));
   });
   _pollWebhookEvents();
   setInterval(_pollWebhookEvents, 30000);
-  _syncAllImoveisStatus(); // sincroniza status na inicialização
+  _syncAllImoveisStatus();
   initAuth();
   _autoDetectAsaas();
 }
