@@ -2457,6 +2457,67 @@
   </div>
 </div>
 
+<!-- ══ MODAL USUÁRIOS DA EMPRESA (Super Master) ══ -->
+<div class="modal-overlay" id="modal-emp-users">
+  <div class="modal" style="max-width:700px">
+    <div class="modal-head">
+      <h3 id="modal-emp-users-title">Usuários da Empresa</h3>
+      <button class="modal-close" onclick="closeModal('modal-emp-users')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <strong>Usuários cadastrados</strong>
+        <button class="btn btn-primary btn-sm" onclick="openEmpUserForm(null)">+ Novo Usuário</button>
+      </div>
+      <table class="table" style="margin-bottom:16px">
+        <thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Ações</th></tr></thead>
+        <tbody id="emp-users-tbody"></tbody>
+      </table>
+
+      <!-- Formulário inline de criação/edição -->
+      <div id="emp-user-form-area" style="display:none;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:10px;padding:16px;margin-top:8px">
+        <h4 id="emp-user-form-title" style="margin:0 0 12px">Novo Usuário</h4>
+        <form id="form-emp-user" onsubmit="return false">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Nome Completo *</label>
+              <input name="nome" type="text" placeholder="Nome do usuário">
+            </div>
+            <div class="form-group">
+              <label>Usuário (login) *</label>
+              <input name="usuario" type="text" placeholder="login sem espaços">
+            </div>
+            <div class="form-group">
+              <label>Senha <span style="font-size:11px;color:var(--gray-400)">(deixe em branco para manter)</span></label>
+              <input name="senha" type="password" placeholder="••••••••">
+            </div>
+            <div class="form-group">
+              <label>Perfil</label>
+              <select name="perfil">
+                <option value="admin">👑 Admin (acesso total)</option>
+                <option value="usuario">👤 Usuário (permissões limitadas)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Status</label>
+              <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
+                <input name="ativo" type="checkbox" checked> Usuário ativo
+              </label>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <button type="button" class="btn btn-primary" onclick="saveEmpUser()">💾 Salvar Usuário</button>
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('emp-user-form-area').style.display='none'">Cancelar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-emp-users')">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <!-- TOAST -->
 <div id="toast" class="toast"></div>
 
@@ -2479,7 +2540,7 @@
     });
   }
   await loadScript('js/data.js?v=11');
-  await loadScript('js/app.js?v=18');
+  await loadScript('js/app.js?v=19');
   const el = document.getElementById('topbar-date');
   if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 })();

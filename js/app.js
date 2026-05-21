@@ -6615,9 +6615,95 @@ function saveEmpresaLogo() {
 function gerenciarUsuariosEmpresa(empId) {
   const emp = DB.empresas.find(e => e.id === empId);
   if (!emp) return;
-  const users = DB.usuarios.filter(u => u.empresaId === empId);
-  const info = users.map(u => `• ${u.nome} (${u.usuario}) — ${u.perfil}`).join('\n') || 'Nenhum usuário ainda';
-  alert(`Usuários da empresa "${emp.nome}":\n\n${info}\n\nPara gerenciar, use a aba Usuários após fazer login como admin dessa empresa.`);
+  document.getElementById('modal-emp-users-title').textContent = `Usuários — ${emp.nome}`;
+  document.getElementById('modal-emp-users').dataset.empId = empId;
+  _renderEmpUsersLista(empId);
+  document.getElementById('modal-emp-users').classList.add('open');
+}
+
+function _renderEmpUsersLista(empId) {
+  const users = DB.usuarios.filter(u => u.empresaId === empId && u.perfil !== 'inquilino');
+  const tbody = document.getElementById('emp-users-tbody');
+  tbody.innerHTML = users.length === 0
+    ? `<tr><td colspan="4" style="text-align:center;color:var(--gray-400);padding:20px">Nenhum usuário cadastrado</td></tr>`
+    : users.map(u => `<tr>
+        <td><strong>${u.nome}</strong></td>
+        <td><code style="background:var(--gray-100);padding:2px 7px;border-radius:5px;font-size:12px">${u.usuario}</code></td>
+        <td><span class="badge badge-${u.perfil === 'admin' ? 'admin' : 'usuario'}">${u.perfil === 'admin' ? '👑 Admin' : '👤 Usuário'}</span>
+            ${u.ativo ? '' : ' <span class="badge badge-red">Inativo</span>'}</td>
+        <td>
+          <div class="actions">
+            <button class="btn btn-ghost btn-sm" onclick="openEmpUserForm(${u.id})">Editar</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteEmpUser(${u.id})">Excluir</button>
+          </div>
+        </td>
+      </tr>`).join('');
+}
+
+function openEmpUserForm(userId) {
+  const modal = document.getElementById('modal-emp-users');
+  const empId = parseInt(modal.dataset.empId);
+  const u = userId ? DB.usuarios.find(x => x.id === userId) : null;
+  const form = document.getElementById('form-emp-user');
+  form.reset();
+  form.dataset.id    = u ? u.id : '';
+  form.dataset.empId = empId;
+  document.getElementById('emp-user-form-title').textContent = u ? 'Editar Usuário' : 'Novo Usuário';
+  if (u) {
+    form.elements['nome'].value    = u.nome    || '';
+    form.elements['usuario'].value = u.usuario || '';
+    form.elements['perfil'].value  = u.perfil  || 'admin';
+    form.elements['ativo'].checked = u.ativo !== false;
+  }
+  document.getElementById('emp-user-form-area').style.display = 'block';
+}
+
+function saveEmpUser() {
+  const form   = document.getElementById('form-emp-user');
+  const id     = form.dataset.id     ? parseInt(form.dataset.id)     : null;
+  const empId  = form.dataset.empId  ? parseInt(form.dataset.empId)  : null;
+  const nome   = form.elements['nome'].value.trim();
+  const usuario = form.elements['usuario'].value.trim();
+  const senha  = form.elements['senha'].value.trim();
+  const perfil = form.elements['perfil'].value;
+  const ativo  = form.elements['ativo'].checked;
+  if (!nome || !usuario) { toast('Nome e usuário são obrigatórios', 'error'); return; }
+  if (!id && !senha) { toast('Senha é obrigatória para novo usuário', 'error'); return; }
+  // Verificar usuário duplicado
+  const dup = DB.usuarios.find(u => u.usuario.toLowerCase() === usuario.toLowerCase() && u.id !== id);
+  if (dup) { toast('Este nome de usuário já existe', 'error'); return; }
+  if (id) {
+    const idx = DB.usuarios.findIndex(x => x.id === id);
+    DB.usuarios[idx] = { ...DB.usuarios[idx], nome, usuario, perfil, ativo,
+      ...(senha ? { senha } : {}) };
+    toast('Usuário atualizado!', 'success');
+  } else {
+    DB.usuarios.push({
+      id: nextId(DB.usuarios), nome, usuario, senha, perfil, ativo,
+      empresaId: empId,
+      permissoes: perfil === 'admin'
+        ? { dashboard:{ver:true}, imoveis:{ver:true,criar:true,editar:true,excluir:true},
+            inquilinos:{ver:true,criar:true,editar:true,excluir:true}, contratos:{ver:true,criar:true,editar:true,excluir:true},
+            financeiro:{ver:true,criar:true,editar:true,excluir:true}, manutencao:{ver:true,criar:true,editar:true,excluir:true},
+            relatorios:{ver:true}, config:{ver:true,editar:true}, usuarios:{ver:true} }
+        : {},
+    });
+    toast('Usuário criado!', 'success');
+  }
+  saveData();
+  form.reset();
+  document.getElementById('emp-user-form-area').style.display = 'none';
+  _renderEmpUsersLista(empId);
+}
+
+function deleteEmpUser(userId) {
+  if (!confirm_('Excluir este usuário?')) return;
+  const u = DB.usuarios.find(x => x.id === userId);
+  const empId = u?.empresaId;
+  DB.usuarios = DB.usuarios.filter(x => x.id !== userId);
+  saveData();
+  if (empId) _renderEmpUsersLista(empId);
+  toast('Usuário excluído');
 }
 
 // ── COBRANÇAS DAS EMPRESAS ──────────────────────────────
