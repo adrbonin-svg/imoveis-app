@@ -33,7 +33,7 @@
 <div id="login-overlay" class="login-overlay hidden">
   <div class="login-card">
     <div class="login-logo">
-      <img src="img/autotrack.png" alt="AutoPrime Tech" style="width:140px;margin-bottom:8px;">
+      <img id="login-logo-img" src="img/autotrack.png" alt="Logo" style="width:140px;margin-bottom:8px;">
     </div>
     <p>Faça login para continuar</p>
     <form onsubmit="event.preventDefault(); doLogin()">
@@ -54,8 +54,8 @@
 <!-- SIDEBAR -->
 <aside class="sidebar">
   <div class="sidebar-logo">
-    <img src="img/autotrack.png" alt="AutoPrime Tech" style="width:120px;display:block;margin:0 auto 4px;">
-    <p style="text-align:center;font-size:11px;color:var(--gray-400);margin:0">Painel administrativo</p>
+    <img id="sidebar-logo-img" src="img/autotrack.png" alt="Logo" style="width:120px;display:block;margin:0 auto 4px;">
+    <p id="sidebar-empresa-nome" style="text-align:center;font-size:11px;color:var(--gray-400);margin:0">Painel administrativo</p>
   </div>
   <nav class="sidebar-nav">
     <div class="nav-item" data-page="dashboard"><span class="nav-icon">📊</span> Dashboard</div>
@@ -68,6 +68,8 @@
     <div class="nav-item" data-page="config"><span class="nav-icon">⚙️</span> Configurações</div>
     <div class="nav-item" data-page="usuarios" id="nav-usuarios" style="display:none"><span class="nav-icon">👤</span> Usuários</div>
     <div class="nav-item" data-page="auditoria" id="nav-auditoria" style="display:none"><span class="nav-icon">🔍</span> Auditoria</div>
+    <div class="nav-item" data-page="empresas" id="nav-empresas" style="display:none"><span class="nav-icon">🏢</span> Empresas</div>
+    <div class="nav-item" data-page="cobrancas-empresas" id="nav-cobrancas-empresas" style="display:none"><span class="nav-icon">💳</span> Cobranças</div>
   </nav>
 </aside>
 
@@ -921,6 +923,48 @@
         </div>
       </div>
     </div><!-- /page-auditoria -->
+
+    <!-- ══ EMPRESAS ══ -->
+    <div id="page-empresas" class="page">
+      <div class="page-header">
+        <div>
+          <h3>Empresas Clientes</h3>
+          <p class="page-sub">Gerencie as empresas que utilizam o sistema</p>
+        </div>
+        <button class="btn btn-primary" onclick="openEmpresa(null)">+ Nova Empresa</button>
+      </div>
+      <div class="stats-row" style="margin-bottom:16px">
+        <div class="stat-card"><div class="stat-icon">🏢</div><div><div class="stat-value" id="emp-total">0</div><div class="stat-label">Total</div></div></div>
+        <div class="stat-card"><div class="stat-icon">✅</div><div><div class="stat-value" id="emp-ativas">0</div><div class="stat-label">Ativas</div></div></div>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Empresa</th><th>CNPJ</th><th>E-mail</th><th>Telefone</th><th>Mensalidade</th><th>Status</th><th>Ações</th></tr></thead>
+          <tbody id="emp-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══ COBRANÇAS DAS EMPRESAS ══ -->
+    <div id="page-cobrancas-empresas" class="page">
+      <div class="page-header">
+        <div>
+          <h3>Cobranças das Empresas</h3>
+          <p class="page-sub">Controle as mensalidades das empresas clientes</p>
+        </div>
+        <button class="btn btn-primary" onclick="openCobrancaEmpresa(null)">+ Nova Cobrança</button>
+      </div>
+      <div class="stats-row" style="margin-bottom:16px">
+        <div class="stat-card"><div class="stat-icon">⏳</div><div><div class="stat-value" id="cob-emp-pendente">R$ 0</div><div class="stat-label">Pendente</div></div></div>
+        <div class="stat-card"><div class="stat-icon">✅</div><div><div class="stat-value" id="cob-emp-recebido">R$ 0</div><div class="stat-label">Recebido</div></div></div>
+      </div>
+      <div class="table-container">
+        <table class="table">
+          <thead><tr><th>Empresa</th><th>Vencimento</th><th>Valor</th><th>Descrição</th><th>Status</th><th>Pagamento</th><th>Ações</th></tr></thead>
+          <tbody id="cob-emp-tbody"></tbody>
+        </table>
+      </div>
+    </div>
 
   </div><!-- /content -->
 </main>
@@ -2291,6 +2335,128 @@
   </div>
 </div>
 
+<!-- MODAL EMPRESA -->
+<div class="modal-overlay" id="modal-empresa">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-empresa-title">Nova Empresa</h3>
+      <button class="modal-close" onclick="closeModal('modal-empresa')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-empresa" onsubmit="return false">
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Nome da Empresa *</label>
+            <input name="nome" type="text" placeholder="Razão Social ou Nome Fantasia" required>
+          </div>
+          <div class="form-group">
+            <label>CNPJ</label>
+            <input name="cnpj" type="text" placeholder="00.000.000/0001-00">
+          </div>
+          <div class="form-group">
+            <label>E-mail</label>
+            <input name="email" type="email" placeholder="contato@empresa.com.br">
+          </div>
+          <div class="form-group">
+            <label>Telefone</label>
+            <input name="telefone" type="text" placeholder="(00) 00000-0000">
+          </div>
+          <div class="form-group form-col-2">
+            <label>Endereço</label>
+            <input name="endereco" type="text" placeholder="Rua, número, bairro, cidade - UF">
+          </div>
+          <div class="form-group">
+            <label>Plano</label>
+            <select name="plano">
+              <option value="mensal">Mensal</option>
+              <option value="trimestral">Trimestral</option>
+              <option value="semestral">Semestral</option>
+              <option value="anual">Anual</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Valor do Plano (R$)</label>
+            <input name="valorPlano" type="number" step="0.01" min="0" placeholder="0,00">
+          </div>
+          <div class="form-group">
+            <label>Próximo Vencimento</label>
+            <input name="vencimentoPlano" type="date">
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
+              <input name="ativo" type="checkbox" checked> Empresa ativa
+            </label>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Logo da Empresa</label>
+            <div style="display:flex;align-items:center;gap:12px">
+              <img id="emp-logo-preview" src="" style="width:60px;height:60px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;display:none">
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer">
+                📷 Selecionar Logo
+                <input type="file" accept="image/*" style="display:none" onchange="empUploadLogo(this)">
+              </label>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="saveEmpresaLogo()">💾 Salvar Logo</button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-empresa')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveEmpresa()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL COBRANÇA EMPRESA -->
+<div class="modal-overlay" id="modal-cobranca-empresa">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-cobranca-emp-title">Nova Cobrança</h3>
+      <button class="modal-close" onclick="closeModal('modal-cobranca-empresa')">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="form-cobranca-empresa" onsubmit="return false">
+        <div class="form-grid">
+          <div class="form-group form-col-2">
+            <label>Empresa *</label>
+            <select name="empresaId"></select>
+          </div>
+          <div class="form-group">
+            <label>Vencimento *</label>
+            <input name="vencimento" type="date" required>
+          </div>
+          <div class="form-group">
+            <label>Valor (R$) *</label>
+            <input name="valor" type="number" step="0.01" min="0" placeholder="0,00" required>
+          </div>
+          <div class="form-group form-col-2">
+            <label>Descrição</label>
+            <input name="descricao" type="text" placeholder="Ex: Mensalidade maio/2026">
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select name="status">
+              <option value="PENDENTE">Pendente</option>
+              <option value="PAGO">Pago</option>
+              <option value="VENCIDO">Vencido</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Data de Pagamento</label>
+            <input name="dataPagamento" type="date">
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-cobranca-empresa')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveCobrancaEmpresa()">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <!-- TOAST -->
 <div id="toast" class="toast"></div>
 
@@ -2312,8 +2478,8 @@
       document.body.appendChild(s);
     });
   }
-  await loadScript('js/data.js?v=10');
-  await loadScript('js/app.js?v=17');
+  await loadScript('js/data.js?v=11');
+  await loadScript('js/app.js?v=18');
   const el = document.getElementById('topbar-date');
   if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 })();

@@ -450,6 +450,18 @@ function valorPorExtenso(valor) {
 
 let _currentUser = null;
 
+function _isSuperMaster() { return _currentUser?.perfil === 'supermaster'; }
+function _currentEmpresaId() { return _currentUser?.empresaId ?? null; }
+function _myData(arr) {
+  if (!Array.isArray(arr)) return [];
+  if (_isSuperMaster()) return arr;
+  const eid = _currentEmpresaId();
+  return eid ? arr.filter(x => x.empresaId === eid) : arr;
+}
+function _empresaAtual() {
+  return DB.empresas.find(e => e.id === _currentEmpresaId()) || null;
+}
+
 const PAGINAS_PERM = [
   { id: 'dashboard',    label: 'Dashboard',     icon: '📊', acoes: [] },
   { id: 'imoveis',      label: 'Imóveis',        icon: '🏠', acoes: ['criar','editar','excluir'] },
@@ -460,12 +472,15 @@ const PAGINAS_PERM = [
   { id: 'relatorios',   label: 'Relatórios',     icon: '📋', acoes: [] },
   { id: 'config',       label: 'Configurações',  icon: '⚙️',  acoes: ['editar'] },
   { id: 'auditoria',    label: 'Auditoria',      icon: '🔍', acoes: [] },
+  { id: 'empresas',           label: 'Empresas',   icon: '🏢', acoes: ['criar','editar','excluir'] },
+  { id: 'cobrancas-empresas', label: 'Cobranças',  icon: '💳', acoes: ['criar','editar','excluir'] },
 ];
 
 // Verifica se o usuário logado pode executar uma ação em determinada página
 // acao: 'ver' | 'criar' | 'editar' | 'excluir'
 function _podeAcao(page, acao) {
   if (!_currentUser) return false;
+  if (_currentUser.perfil === 'supermaster') return true;
   if (_currentUser.perfil === 'admin') return true;
   const p = _currentUser.permissoes;
   if (!p) return false;
@@ -477,9 +492,10 @@ function _podeAcao(page, acao) {
 
 function _temPermissao(page) {
   if (!_currentUser) return false;
-  if (_currentUser.perfil === 'admin') return true;
+  if (_currentUser.perfil === 'supermaster') return ['empresas','cobrancas-empresas'].includes(page);
   if (_currentUser.perfil === 'inquilino') return page === 'portal';
-  if (page === 'usuarios') return false;
+  if (page === 'usuarios') return _currentUser.perfil === 'admin';
+  if (['empresas','cobrancas-empresas'].includes(page)) return false;
   return _podeAcao(page, 'ver');
 }
 
@@ -537,6 +553,21 @@ function _mostrarApp() {
     navigate('portal');
     return;
   }
+  // Super Master — painel de empresas
+  if (u.perfil === 'supermaster') {
+    document.body.classList.remove('modo-portal');
+    document.body.classList.add('modo-supermaster');
+    const initials = 'SM';
+    document.getElementById('topbar-user-avatar').textContent = initials;
+    document.getElementById('topbar-user-name').textContent   = 'Super Master';
+    document.getElementById('topbar-user-role').textContent   = 'Administrador Geral';
+    document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+      const p = el.dataset.page;
+      el.style.display = ['empresas','cobrancas-empresas'].includes(p) ? '' : 'none';
+    });
+    navigate('empresas');
+    return;
+  }
   document.body.classList.remove('modo-portal');
   // Atualiza topbar
   const initials = u.nome.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase();
@@ -559,6 +590,16 @@ function _mostrarApp() {
     const el = document.getElementById(btn);
     if (el) el.style.display = _podeAcao(page, 'criar') ? '' : 'none';
   });
+
+  // Aplica logo da empresa
+  const _emp = _empresaAtual();
+  const _logoSrc = _emp?.logo || 'img/autotrack.png';
+  const _sidebarLogo = document.getElementById('sidebar-logo-img');
+  const _loginLogo   = document.getElementById('login-logo-img');
+  if (_sidebarLogo) _sidebarLogo.src = _logoSrc;
+  if (_loginLogo)   _loginLogo.src   = _logoSrc;
+  const _nomeEl = document.getElementById('sidebar-empresa-nome');
+  if (_nomeEl && _emp?.nome) _nomeEl.textContent = _emp.nome;
 
   // Navega para primeira página acessível
   const first = PAGINAS_PERM.find(p => _temPermissao(p.id));
@@ -591,6 +632,8 @@ function navigate(page) {
     contratos: 'Contratos', financeiro: 'Financeiro', manutencao: 'Manutenção',
     relatorios: 'Relatórios', config: 'Configurações', usuarios: 'Usuários',
     portal: 'Meu Portal', auditoria: 'Auditoria',
+    empresas:             'Empresas',
+    'cobrancas-empresas': 'Cobranças das Empresas',
   }[page] || page;
   renderPage(page);
 }
@@ -606,16 +649,22 @@ function renderPage(page) {
   else if (page === 'usuarios')   renderUsuarios();
   else if (page === 'portal')     renderPortal();
   else if (page === 'auditoria')  renderAuditoria();
+  else if (page === 'empresas')           renderEmpresas();
+  else if (page === 'cobrancas-empresas') renderCobrancasEmpresas();
 }
 
 // ── DASHBOARD ──────────────────────────────────────────
 function renderDashboard() {
   _syncAllImoveisStatus(); // atualiza disponibilidade com base em contratos vencidos
-  const total = DB.imoveis.length;
-  const ocupados = DB.imoveis.filter(i => i.status === 'OCUPADO').length;
-  const disponiveis = DB.imoveis.filter(i => i.status === 'DISPONÍVEL').length;
-  const contratoAtivo = DB.contratos.filter(c => c.status === 'ATIVO').length;
-  const receitaMensal = DB.contratos.filter(c => c.status === 'ATIVO').reduce((s, c) => s + c.valorMensal, 0);
+  const _myImoveis   = _myData(DB.imoveis);
+  const _myContratos = _myData(DB.contratos);
+  const _myFinanceiro = _myData(DB.financeiro);
+  const _myManutencao = _myData(DB.manutencao);
+  const total = _myImoveis.length;
+  const ocupados = _myImoveis.filter(i => i.status === 'OCUPADO').length;
+  const disponiveis = _myImoveis.filter(i => i.status === 'DISPONÍVEL').length;
+  const contratoAtivo = _myContratos.filter(c => c.status === 'ATIVO').length;
+  const receitaMensal = _myContratos.filter(c => c.status === 'ATIVO').reduce((s, c) => s + c.valorMensal, 0);
   const now = new Date();
   const mesAtual = now.getMonth() + 1;
   const anoAtual = now.getFullYear();
@@ -625,7 +674,7 @@ function renderDashboard() {
   const _finPago = f => f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
 
   // Receita recebida no mês atual (só registros pagos do mês)
-  const receitaRecebida = DB.financeiro
+  const receitaRecebida = _myFinanceiro
     .filter(f => {
       if (!_finPago(f)) return false;
       const d = new Date((f.dataPagamento || '') + 'T12:00:00');
@@ -633,11 +682,11 @@ function renderDashboard() {
     })
     .reduce((s, f) => s + (f.valorRecebido || 0), 0);
 
-  const manutPendente = DB.manutencao.filter(m => m.status !== 'Concluído').length;
+  const manutPendente = _myManutencao.filter(m => m.status !== 'Concluído').length;
   const pct = total > 0 ? Math.round((ocupados / total) * 100) : 0;
 
   // Pagamentos vencidos: mesma lógica da aba Financeira (PENDENTE + data passada)
-  const pgtoVencidos = DB.financeiro.filter(f => {
+  const pgtoVencidos = _myFinanceiro.filter(f => {
     if (f.tipo === 'caucao') return false;
     if (_finPago(f)) return false;
     if ((f.totalGeral || 0) <= 0) return false;
@@ -661,7 +710,7 @@ function renderDashboard() {
   cardCob.style.borderLeft = totalAlertas > 0 ? '4px solid var(--danger)' : '4px solid var(--success)';
 
   // Vistorias aguardando assinatura
-  const vistSemAssinar = DB.inquilinos.filter(i =>
+  const vistSemAssinar = _myData(DB.inquilinos).filter(i =>
     Array.isArray(i.checklistFotos) && i.checklistFotos.some(ck => !ck.confirmadoEm)
   );
   const cardVistAssinar = document.getElementById('dash-vist-assinar')?.closest('.card');
@@ -700,7 +749,7 @@ function renderDashboard() {
   }
 
   // Alertas de manutenção preventiva
-  const prevAlertas = DB.manutencaoPreventiva.filter(item => {
+  const prevAlertas = _myData(DB.manutencaoPreventiva).filter(item => {
     const st = _prevAlertStatus(item);
     return st === 'vencida' || st === 'alerta';
   });
@@ -755,7 +804,7 @@ function renderDashboard() {
   // Contratos por vencer (30 dias) — com urgência
   const em7Str  = (() => { const d = new Date(); d.setDate(d.getDate() + 7);  return d.toISOString().split('T')[0]; })();
   const em30Str = (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0]; })();
-  let vencendo = DB.contratos
+  let vencendo = _myContratos
     .filter(c => {
       if (!c.dataTermino || c.status !== 'ATIVO') return false;
       return c.dataTermino >= todayStr && c.dataTermino <= em30Str;
@@ -879,7 +928,7 @@ function renderDashboard() {
     _th('dash-pgto','valorRecebido','Valor Recebido') +
   '</tr>';
 
-  const pgtoBase = DB.financeiro.filter(f => f.valorRecebido > 0);
+  const pgtoBase = _myFinanceiro.filter(f => f.valorRecebido > 0);
   let ultimos;
   if (_sortState['dash-pgto']) {
     ultimos = _aplicarSort(pgtoBase, 'dash-pgto');
@@ -1058,7 +1107,7 @@ function renderInquilinos() {
   const _precisaVistoria   = i => _temContratoAtivo(i) && !_temChecklist(i);
   const _ckNaoAssinado     = i => _temChecklist(i) && i.checklistFotos.some(ck => !ck.confirmadoEm);
 
-  let list = DB.inquilinos.filter(i =>
+  let list = _myData(DB.inquilinos).filter(i =>
     i.nome.toLowerCase().includes(search) ||
     (i.cpf || '').toLowerCase().includes(search)
   );
@@ -1422,7 +1471,7 @@ function saveInquilino() {
     DB.inquilinos[idx] = { ...DB.inquilinos[idx], ...data };
     _auditLog('editar', 'inquilino', id, data.nome, antes, DB.inquilinos[idx]);
   } else {
-    DB.inquilinos.push({ id: nextId(DB.inquilinos), ...data });
+    DB.inquilinos.push({ id: nextId(DB.inquilinos), empresaId: _currentEmpresaId(), ...data });
     // Auto-criar acesso para o inquilino (CPF como login e senha)
     const novoInq  = DB.inquilinos[DB.inquilinos.length - 1];
     const jaExiste = DB.usuarios.find(u => u.usuario === cpfLimpo && u.perfil === 'inquilino');
@@ -1906,7 +1955,7 @@ function renderImoveis() {
   renderPredios();
   const search = (document.getElementById('imo-search')?.value || '').toLowerCase();
   const statusFilter = _getActivePill('imo-filter-bar');
-  let list = DB.imoveis.filter(i =>
+  let list = _myData(DB.imoveis).filter(i =>
     i.nome.toLowerCase().includes(search) ||
     (i.cidade || '').toLowerCase().includes(search)
   );
@@ -2031,7 +2080,7 @@ function saveImovel() {
     DB.imoveis[idx] = { ...DB.imoveis[idx], ...data };
     _auditLog('editar', 'imovel', id, data.nome, antes, DB.imoveis[idx]);
   } else {
-    DB.imoveis.push({ id: nextId(DB.imoveis), ...data });
+    DB.imoveis.push({ id: nextId(DB.imoveis), empresaId: _currentEmpresaId(), ...data });
     const novoImo = DB.imoveis[DB.imoveis.length - 1];
     _auditLog('criar', 'imovel', novoImo.id, data.nome, null, novoImo);
   }
@@ -2110,7 +2159,7 @@ function updateCaucaoInfo() {
 function renderContratos() {
   const search = (document.getElementById('ct-search')?.value || '').toLowerCase();
   const statusFilter = _getActivePill('ct-filter-bar');
-  let list = DB.contratos.filter(c =>
+  let list = _myData(DB.contratos).filter(c =>
     c.codigo.toLowerCase().includes(search) ||
     c.imovel.toLowerCase().includes(search) ||
     (c.inquilino || '').toLowerCase().includes(search)
@@ -2456,7 +2505,7 @@ function saveContrato() {
     DB.contratos[idx] = { ...DB.contratos[idx], ...data };
     _auditLog('editar', 'contrato', id, data.codigo, antes, DB.contratos[idx]);
   } else {
-    DB.contratos.push({ id: nextId(DB.contratos), ...data });
+    DB.contratos.push({ id: nextId(DB.contratos), empresaId: _currentEmpresaId(), ...data });
     const novoCt = DB.contratos[DB.contratos.length - 1];
     _auditLog('criar', 'contrato', novoCt.id, data.codigo, null, novoCt);
   }
@@ -3034,7 +3083,7 @@ function renderFinanceiro() {
   const mes     = parseInt(document.getElementById('fin-sel-mes')?.value);
   const ano     = parseInt(document.getElementById('fin-sel-ano')?.value);
 
-  let list = [...DB.financeiro];
+  let list = [..._myData(DB.financeiro)];
 
   // Filtro de período
   if (!todos) {
@@ -3348,7 +3397,7 @@ function saveFinanceiro() {
     DB.financeiro[idx] = { ...DB.financeiro[idx], ...data };
     _auditLog('editar', 'financeiro', id, data.contrato, antes, DB.financeiro[idx]);
   } else {
-    DB.financeiro.push({ id: nextId(DB.financeiro), ...data });
+    DB.financeiro.push({ id: nextId(DB.financeiro), empresaId: _currentEmpresaId(), ...data });
     const novoFin = DB.financeiro[DB.financeiro.length - 1];
     _auditLog('criar', 'financeiro', novoFin.id, data.contrato, null, novoFin);
   }
@@ -3598,7 +3647,7 @@ function renderManutencao() {
   const mes    = parseInt(document.getElementById('man-sel-mes')?.value);
   const ano    = parseInt(document.getElementById('man-sel-ano')?.value);
 
-  let list = [...DB.manutencao];
+  let list = [..._myData(DB.manutencao)];
 
   if (!todos) {
     list = list.filter(m => {
@@ -3785,7 +3834,7 @@ function saveManutencao() {
     DB.manutencao[idx] = { ...DB.manutencao[idx], ...data };
     _auditLog('editar', 'manutencao', id, data.imovel, antes, DB.manutencao[idx]);
   } else {
-    DB.manutencao.push({ id: nextId(DB.manutencao), ...data });
+    DB.manutencao.push({ id: nextId(DB.manutencao), empresaId: _currentEmpresaId(), ...data });
     const novoMan = DB.manutencao[DB.manutencao.length - 1];
     _auditLog('criar', 'manutencao', novoMan.id, data.imovel, null, novoMan);
   }
@@ -6421,6 +6470,255 @@ async function restaurarDoServidor() {
   } catch (e) {
     toast('Falha ao restaurar: ' + e.message, 'error');
   }
+}
+
+// ── EMPRESAS ────────────────────────────────────────────
+function renderEmpresas() {
+  const tbody = document.getElementById('emp-tbody');
+  if (!tbody) return;
+  const list = DB.empresas;
+  document.getElementById('emp-total').textContent  = list.length;
+  document.getElementById('emp-ativas').textContent = list.filter(e => e.ativo).length;
+  tbody.innerHTML = list.length === 0
+    ? `<tr><td colspan="7"><div class="empty"><div class="empty-icon">🏢</div><p>Nenhuma empresa cadastrada</p></div></td></tr>`
+    : list.map(e => {
+        const venc = e.vencimentoPlano ? new Date(e.vencimentoPlano + 'T12:00:00') : null;
+        const hoje = new Date();
+        const vencido = venc && venc < hoje;
+        const proximoVenc = venc && !vencido && ((venc - hoje) / 86400000) <= 7;
+        const statusBadge = !e.ativo ? '<span class="badge badge-red">Inativa</span>'
+          : vencido ? '<span class="badge badge-red">Vencida</span>'
+          : proximoVenc ? '<span class="badge badge-yellow">Vence em breve</span>'
+          : '<span class="badge badge-green">Ativa</span>';
+        return `<tr>
+          <td>
+            ${e.logo ? `<img src="${e.logo}" style="width:40px;height:40px;object-fit:contain;border-radius:6px;border:1px solid #e5e7eb;margin-right:8px">` : '<span style="font-size:24px;margin-right:8px">🏢</span>'}
+            <strong>${e.nome}</strong>
+          </td>
+          <td>${e.cnpj || '—'}</td>
+          <td>${e.email || '—'}</td>
+          <td>${e.telefone || '—'}</td>
+          <td>${e.valorPlano > 0 ? fmt(e.valorPlano) : '—'}</td>
+          <td>${statusBadge}</td>
+          <td>
+            <div class="actions">
+              <button class="btn btn-ghost btn-sm" onclick="openEmpresa(${e.id})">Editar</button>
+              <button class="btn btn-ghost btn-sm" onclick="gerenciarUsuariosEmpresa(${e.id})">👤 Usuários</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteEmpresa(${e.id})">Excluir</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+}
+
+function openEmpresa(id) {
+  const e = id ? DB.empresas.find(x => x.id === id) : null;
+  const form = document.getElementById('form-empresa');
+  form.reset();
+  document.getElementById('modal-empresa-title').textContent = e ? 'Editar Empresa' : 'Nova Empresa';
+  form.dataset.id = e ? e.id : '';
+  if (e) {
+    form.elements['nome'].value         = e.nome || '';
+    form.elements['cnpj'].value         = e.cnpj || '';
+    form.elements['email'].value        = e.email || '';
+    form.elements['telefone'].value     = e.telefone || '';
+    form.elements['endereco'].value     = e.endereco || '';
+    form.elements['plano'].value        = e.plano || 'mensal';
+    form.elements['valorPlano'].value   = e.valorPlano || '';
+    form.elements['vencimentoPlano'].value = e.vencimentoPlano || '';
+    form.elements['ativo'].checked      = e.ativo !== false;
+    const prev = document.getElementById('emp-logo-preview');
+    if (prev) prev.src = e.logo || '';
+    if (prev) prev.style.display = e.logo ? 'block' : 'none';
+  }
+  document.getElementById('modal-empresa').classList.add('open');
+}
+
+function saveEmpresa() {
+  const form = document.getElementById('form-empresa');
+  const id   = form.dataset.id ? parseInt(form.dataset.id) : null;
+  const nome = form.elements['nome'].value.trim();
+  if (!nome) { toast('Nome da empresa é obrigatório', 'error'); return; }
+  const data = {
+    nome,
+    cnpj:            form.elements['cnpj'].value.trim(),
+    email:           form.elements['email'].value.trim(),
+    telefone:        form.elements['telefone'].value.trim(),
+    endereco:        form.elements['endereco'].value.trim(),
+    plano:           form.elements['plano'].value,
+    valorPlano:      parseFloat(form.elements['valorPlano'].value) || 0,
+    vencimentoPlano: form.elements['vencimentoPlano'].value,
+    ativo:           form.elements['ativo'].checked,
+  };
+  if (id) {
+    const idx = DB.empresas.findIndex(x => x.id === id);
+    DB.empresas[idx] = { ...DB.empresas[idx], ...data };
+  } else {
+    const novoId = nextId(DB.empresas);
+    DB.empresas.push({ id: novoId, logo: null, criadoEm: new Date().toISOString().split('T')[0], ...data });
+    // Criar usuário admin para a nova empresa
+    const adminId = nextId(DB.usuarios);
+    const cpfLogin = 'admin' + novoId;
+    DB.usuarios.push({
+      id: adminId, nome: 'Admin ' + nome, usuario: cpfLogin, senha: cpfLogin,
+      perfil: 'admin', empresaId: novoId,
+      permissoes: { dashboard:{ver:true}, imoveis:{ver:true,criar:true,editar:true,excluir:true},
+        inquilinos:{ver:true,criar:true,editar:true,excluir:true}, contratos:{ver:true,criar:true,editar:true,excluir:true},
+        financeiro:{ver:true,criar:true,editar:true,excluir:true}, manutencao:{ver:true,criar:true,editar:true,excluir:true},
+        relatorios:{ver:true}, config:{ver:true,editar:true}, usuarios:{ver:true} },
+      ativo: true,
+    });
+    toast(`Empresa criada! Acesso admin: usuário "${cpfLogin}" · senha "${cpfLogin}"`, 'success');
+  }
+  saveData();
+  closeModal('modal-empresa');
+  renderEmpresas();
+  if (id) toast('Empresa atualizada!', 'success');
+}
+
+function deleteEmpresa(id) {
+  if (!confirm_('Excluir esta empresa e todos os seus dados?')) return;
+  DB.empresas      = DB.empresas.filter(x => x.id !== id);
+  DB.usuarios      = DB.usuarios.filter(x => x.empresaId !== id);
+  DB.inquilinos    = DB.inquilinos.filter(x => x.empresaId !== id);
+  DB.imoveis       = DB.imoveis.filter(x => x.empresaId !== id);
+  DB.contratos     = DB.contratos.filter(x => x.empresaId !== id);
+  DB.financeiro    = DB.financeiro.filter(x => x.empresaId !== id);
+  DB.manutencao    = DB.manutencao.filter(x => x.empresaId !== id);
+  saveData();
+  renderEmpresas();
+  toast('Empresa excluída', 'success');
+}
+
+function empUploadLogo(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) { toast('Logo muito grande (máx. 2MB)', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const prev = document.getElementById('emp-logo-preview');
+    if (prev) { prev.src = e.target.result; prev.style.display = 'block'; }
+    document.getElementById('form-empresa').dataset.logo = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveEmpresaLogo() {
+  const form = document.getElementById('form-empresa');
+  const id = form.dataset.id ? parseInt(form.dataset.id) : null;
+  const logo = form.dataset.logo;
+  if (!id || !logo) return;
+  const idx = DB.empresas.findIndex(x => x.id === id);
+  if (idx >= 0) { DB.empresas[idx].logo = logo; saveData(); toast('Logo salva!', 'success'); }
+}
+
+function gerenciarUsuariosEmpresa(empId) {
+  const emp = DB.empresas.find(e => e.id === empId);
+  if (!emp) return;
+  const users = DB.usuarios.filter(u => u.empresaId === empId);
+  const info = users.map(u => `• ${u.nome} (${u.usuario}) — ${u.perfil}`).join('\n') || 'Nenhum usuário ainda';
+  alert(`Usuários da empresa "${emp.nome}":\n\n${info}\n\nPara gerenciar, use a aba Usuários após fazer login como admin dessa empresa.`);
+}
+
+// ── COBRANÇAS DAS EMPRESAS ──────────────────────────────
+function renderCobrancasEmpresas() {
+  const tbody = document.getElementById('cob-emp-tbody');
+  if (!tbody) return;
+  const list = DB.cobrancasEmpresas;
+  const totalPendente = list.filter(c => c.status !== 'PAGO').reduce((s, c) => s + (c.valor || 0), 0);
+  const totalRecebido = list.filter(c => c.status === 'PAGO').reduce((s, c) => s + (c.valor || 0), 0);
+  const el1 = document.getElementById('cob-emp-pendente');
+  const el2 = document.getElementById('cob-emp-recebido');
+  if (el1) el1.textContent = fmt(totalPendente);
+  if (el2) el2.textContent = fmt(totalRecebido);
+  tbody.innerHTML = list.length === 0
+    ? `<tr><td colspan="7"><div class="empty"><div class="empty-icon">💳</div><p>Nenhuma cobrança lançada</p></div></td></tr>`
+    : list.map(c => {
+        const emp = DB.empresas.find(e => e.id === c.empresaId);
+        const hoje = new Date();
+        const venc = c.vencimento ? new Date(c.vencimento + 'T12:00:00') : null;
+        const status = c.status || (venc && venc < hoje && c.status !== 'PAGO' ? 'VENCIDO' : 'PENDENTE');
+        const badge = status === 'PAGO' ? '<span class="badge badge-green">PAGO</span>'
+          : status === 'VENCIDO' ? '<span class="badge badge-red">VENCIDO</span>'
+          : '<span class="badge badge-yellow">PENDENTE</span>';
+        return `<tr>
+          <td><strong>${emp?.nome || '—'}</strong></td>
+          <td>${fmtDate(c.vencimento)}</td>
+          <td><strong>${fmt(c.valor)}</strong></td>
+          <td>${c.descricao || '—'}</td>
+          <td>${badge}</td>
+          <td>${c.dataPagamento ? fmtDate(c.dataPagamento) : '—'}</td>
+          <td>
+            <div class="actions">
+              ${c.status !== 'PAGO' ? `<button class="btn btn-primary btn-sm" onclick="baixarCobrancaEmpresa(${c.id})">💰 Baixar</button>` : ''}
+              <button class="btn btn-ghost btn-sm" onclick="openCobrancaEmpresa(${c.id})">Editar</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteCobrancaEmpresa(${c.id})">Excluir</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+}
+
+function openCobrancaEmpresa(id) {
+  const c = id ? DB.cobrancasEmpresas.find(x => x.id === id) : null;
+  const form = document.getElementById('form-cobranca-empresa');
+  form.reset();
+  form.dataset.id = c ? c.id : '';
+  document.getElementById('modal-cobranca-emp-title').textContent = c ? 'Editar Cobrança' : 'Nova Cobrança';
+  // Preencher select de empresas
+  const sel = form.elements['empresaId'];
+  sel.innerHTML = DB.empresas.map(e => `<option value="${e.id}">${e.nome}</option>`).join('');
+  if (c) {
+    sel.value = c.empresaId;
+    form.elements['vencimento'].value  = c.vencimento || '';
+    form.elements['valor'].value       = c.valor || '';
+    form.elements['descricao'].value   = c.descricao || '';
+    form.elements['status'].value      = c.status || 'PENDENTE';
+    form.elements['dataPagamento'].value = c.dataPagamento || '';
+  }
+  document.getElementById('modal-cobranca-empresa').classList.add('open');
+}
+
+function saveCobrancaEmpresa() {
+  const form = document.getElementById('form-cobranca-empresa');
+  const id   = form.dataset.id ? parseInt(form.dataset.id) : null;
+  const data = {
+    empresaId:     parseInt(form.elements['empresaId'].value),
+    vencimento:    form.elements['vencimento'].value,
+    valor:         parseFloat(form.elements['valor'].value) || 0,
+    descricao:     form.elements['descricao'].value.trim(),
+    status:        form.elements['status'].value,
+    dataPagamento: form.elements['dataPagamento'].value,
+  };
+  if (!data.vencimento || !data.valor) { toast('Vencimento e valor são obrigatórios', 'error'); return; }
+  if (id) {
+    const idx = DB.cobrancasEmpresas.findIndex(x => x.id === id);
+    DB.cobrancasEmpresas[idx] = { ...DB.cobrancasEmpresas[idx], ...data };
+  } else {
+    DB.cobrancasEmpresas.push({ id: nextId(DB.cobrancasEmpresas), ...data });
+  }
+  saveData();
+  closeModal('modal-cobranca-empresa');
+  renderCobrancasEmpresas();
+  toast(id ? 'Cobrança atualizada!' : 'Cobrança criada!', 'success');
+}
+
+function deleteCobrancaEmpresa(id) {
+  if (!confirm_('Excluir esta cobrança?')) return;
+  DB.cobrancasEmpresas = DB.cobrancasEmpresas.filter(x => x.id !== id);
+  saveData();
+  renderCobrancasEmpresas();
+  toast('Cobrança excluída');
+}
+
+function baixarCobrancaEmpresa(id) {
+  const idx = DB.cobrancasEmpresas.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  DB.cobrancasEmpresas[idx].status = 'PAGO';
+  DB.cobrancasEmpresas[idx].dataPagamento = new Date().toISOString().split('T')[0];
+  saveData();
+  renderCobrancasEmpresas();
+  toast('Pagamento registrado!', 'success');
 }
 
 // ── INIT ───────────────────────────────────────────────

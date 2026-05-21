@@ -68,6 +68,9 @@ const DB = {
 
   auditoria: [],
 
+  empresas: [],
+  cobrancasEmpresas: [],
+
   usuarios: [
     {
       id: 1,
@@ -435,6 +438,55 @@ function _applyParsedData(parsed, persistLocalStorage) {
       if (f.baixaManual == null && (f.valorRecebido || 0) > 0) f.baixaManual = true;
     });
   }
+  // Multi-empresa: inicialização
+  if (!Array.isArray(DB.empresas)) DB.empresas = [];
+  if (!Array.isArray(DB.cobrancasEmpresas)) DB.cobrancasEmpresas = [];
+
+  // Migration: criar empresa padrão com dados existentes
+  if (DB.empresas.length === 0) {
+    DB.empresas.push({
+      id: 1,
+      nome: DB.config.locador?.nome || 'Empresa Principal',
+      cnpj: '',
+      email: DB.config.locador?.email || '',
+      telefone: DB.config.locador?.telefone || '',
+      endereco: DB.config.locador?.endereco || '',
+      logo: null,
+      ativo: true,
+      plano: 'mensal',
+      valorPlano: 0,
+      vencimentoPlano: '',
+      criadoEm: new Date().toISOString().split('T')[0]
+    });
+  }
+
+  // Migration: adicionar empresaId = 1 em todos os registros existentes
+  ['inquilinos','imoveis','contratos','financeiro','manutencao','predios','manutencaoPreventiva','auditoria'].forEach(k => {
+    if (Array.isArray(DB[k])) DB[k].forEach(x => { if (!x.empresaId) x.empresaId = 1; });
+  });
+
+  // Adicionar usuário também deve ter empresaId (exceto supermaster)
+  if (Array.isArray(DB.usuarios)) {
+    DB.usuarios.forEach(u => {
+      if (u.perfil !== 'supermaster' && !u.empresaId) u.empresaId = 1;
+    });
+  }
+
+  // Criar supermaster se não existir
+  if (!DB.usuarios.find(u => u.perfil === 'supermaster')) {
+    const smId = DB.usuarios.length > 0 ? Math.max(...DB.usuarios.map(x => x.id)) + 1 : 1;
+    DB.usuarios.push({
+      id: smId,
+      nome: 'Super Master',
+      usuario: 'master',
+      senha: 'Master@2026',
+      perfil: 'supermaster',
+      empresaId: null,
+      permissoes: {},
+      ativo: true,
+    });
+  }
+
   if (persistLocalStorage) {
     try { localStorage.setItem('imoveis_db', JSON.stringify(_dbParaLocal(DB))); } catch(e) {}
   }
