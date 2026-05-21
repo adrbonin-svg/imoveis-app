@@ -66,6 +66,8 @@ const DB = {
 
   manutencaoPreventiva: [],
 
+  auditoria: [],
+
   usuarios: [
     {
       id: 1,
@@ -321,23 +323,69 @@ CPF:`,
   }
 };
 
-// Persistência no localStorage + backup no servidor
+// Remove auditoria e todos os dados binários (base64) antes de gravar no localStorage.
+// Fotos, documentos, comprovantes e arquivos ficam APENAS no servidor.
+function _dbParaLocal(db) {
+  const { auditoria: _aud, ...copia } = db;
+  const strip = obj => {
+    if (!obj) return obj;
+    const r = { ...obj };
+    if (Array.isArray(r.documentos))     r.documentos     = r.documentos.map(d => ({ ...d, dados: null }));
+    if (Array.isArray(r.fotos))          r.fotos          = r.fotos.map(f => ({ ...f, dados: null }));
+    if (Array.isArray(r.checklistFotos)) r.checklistFotos = r.checklistFotos.map(f => ({ ...f, dados: null }));
+    if (Array.isArray(r.comprovantes))   r.comprovantes   = r.comprovantes.map(c => ({ ...c, dados: null }));
+    if (r.comprovante?.dados)            r.comprovante    = { ...r.comprovante, dados: null };
+    if (r.arquivo?.dados)               r.arquivo        = { ...r.arquivo, dados: null };
+    return r;
+  };
+  if (Array.isArray(copia.inquilinos)) copia.inquilinos = copia.inquilinos.map(strip);
+  if (Array.isArray(copia.imoveis))   copia.imoveis   = copia.imoveis.map(strip);
+  if (Array.isArray(copia.financeiro))copia.financeiro = copia.financeiro.map(strip);
+  if (Array.isArray(copia.contratos)) copia.contratos  = copia.contratos.map(strip);
+  if (Array.isArray(copia.manutencao))copia.manutencao = copia.manutencao.map(strip);
+  return copia;
+}
+
+// Persistência no localStorage (sem binários) + backup completo no servidor
 function saveData() {
   const json = JSON.stringify(DB);
   try {
-    localStorage.setItem('imoveis_db', json);
+    localStorage.setItem('imoveis_db', JSON.stringify(_dbParaLocal(DB)));
   } catch (e) {
-    if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
-      setTimeout(() => toast(
-        'Armazenamento local cheio — dados salvos apenas no servidor. Considere remover documentos antigos.',
-        'error'
-      ), 0);
-    }
+    // Mesmo sem binários não coube — apaga e deixa o servidor como fonte de verdade
+    try { localStorage.removeItem('imoveis_db'); } catch {}
   }
   fetch('/api/db', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: json,
+  }).catch(() => {});
+}
+
+// Após carregar do localStorage (que não tem binários), busca os binários do servidor
+// e preenche apenas os campos que estão nulos — sem sobrescrever dados recentes.
+function _hydrateBinaryFromServer() {
+  fetch('/api/db').then(r => r.ok ? r.json() : null).then(srv => {
+    if (!srv || srv.error) return;
+    const merge = (localArr, srvArr) => {
+      if (!Array.isArray(localArr) || !Array.isArray(srvArr)) return;
+      localArr.forEach(loc => {
+        const s = srvArr.find(x => x.id === loc.id);
+        if (!s) return;
+        if (!loc.documentos?.some(d => d.dados))     loc.documentos     = s.documentos     || loc.documentos;
+        if (!loc.fotos?.some(f => f.dados))           loc.fotos          = s.fotos          || loc.fotos;
+        if (!loc.checklistFotos?.some(f => f.dados))  loc.checklistFotos = s.checklistFotos || loc.checklistFotos;
+        if (!loc.comprovantes?.some(c => c.dados))    loc.comprovantes   = s.comprovantes   || loc.comprovantes;
+        if (!loc.comprovante?.dados && s.comprovante?.dados) loc.comprovante = s.comprovante;
+        if (!loc.arquivo?.dados && s.arquivo?.dados)        loc.arquivo     = s.arquivo;
+      });
+    };
+    merge(DB.inquilinos, srv.inquilinos);
+    merge(DB.imoveis,    srv.imoveis);
+    merge(DB.financeiro, srv.financeiro);
+    merge(DB.contratos,  srv.contratos);
+    merge(DB.manutencao, srv.manutencao);
+    if (Array.isArray(srv.auditoria)) DB.auditoria = srv.auditoria;
   }).catch(() => {});
 }
 
@@ -357,6 +405,7 @@ function _applyParsedData(parsed, persistLocalStorage) {
   Object.assign(DB, parsed);
   if (!Array.isArray(DB.manutencaoPreventiva)) DB.manutencaoPreventiva = [];
   if (!Array.isArray(DB.predios))              DB.predios = [];
+  if (!Array.isArray(DB.auditoria))            DB.auditoria = [];
   if (Array.isArray(DB.imoveis))
     DB.imoveis.forEach(im  => { if (!Array.isArray(im.checklistFotos))  im.checklistFotos  = []; });
   if (Array.isArray(DB.inquilinos))
@@ -387,7 +436,7 @@ function _applyParsedData(parsed, persistLocalStorage) {
     });
   }
   if (persistLocalStorage) {
-    try { localStorage.setItem('imoveis_db', JSON.stringify(DB)); } catch(e) {}
+    try { localStorage.setItem('imoveis_db', JSON.stringify(_dbParaLocal(DB))); } catch(e) {}
   }
 }
 
@@ -396,26 +445,28 @@ let _dataReadyResolve;
 const _dataReady = new Promise(resolve => { _dataReadyResolve = resolve; });
 
 async function loadData() {
-  // 1ª tentativa: localStorage
+  // 1ª tentativa: localStorage (dados sem binários — carregamento instantâneo)
   const saved = localStorage.getItem('imoveis_db');
   if (saved) {
     try {
       _applyParsedData(JSON.parse(saved), false);
       _dataReadyResolve();
+      // Hidrata fotos/docs/comprovantes do servidor em background
+      _hydrateBinaryFromServer();
       return;
     } catch (e) {
       console.warn('[loadData] localStorage corrompido, tentando servidor...', e);
     }
   }
 
-  // 2ª tentativa: servidor (MongoDB / db.json)
+  // 2ª tentativa: servidor (MongoDB / db.json) — dados completos
   try {
     const res = await fetch('/api/db');
     if (res.ok) {
       const serverData = await res.json();
       if (serverData && !serverData.error) {
-        _applyParsedData(serverData, true); // salva no localStorage ao recuperar
-        console.info('[loadData] Dados restaurados do servidor com sucesso.');
+        _applyParsedData(serverData, true); // salva versão sem binários no localStorage
+        console.info('[loadData] Dados carregados do servidor.');
       }
     }
   } catch (e) {

@@ -4,3 +4,4 @@ webhook-events.json
 *.log
 .DS_Store
 Thumbs.db
+db.json

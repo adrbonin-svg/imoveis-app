@@ -2,6 +2,9 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sistema de Gestão de Imóveis</title>
   <link rel="stylesheet" href="css/style.css">
@@ -64,6 +67,7 @@
     <div class="nav-item" data-page="relatorios"><span class="nav-icon">📊</span> Relatórios</div>
     <div class="nav-item" data-page="config"><span class="nav-icon">⚙️</span> Configurações</div>
     <div class="nav-item" data-page="usuarios" id="nav-usuarios" style="display:none"><span class="nav-icon">👤</span> Usuários</div>
+    <div class="nav-item" data-page="auditoria" id="nav-auditoria" style="display:none"><span class="nav-icon">🔍</span> Auditoria</div>
   </nav>
 </aside>
 
@@ -803,6 +807,48 @@
         </div>
         <button class="btn btn-primary" onclick="saveAsaasConfig()">💾 Salvar e Aplicar Configurações Asaas</button>
 
+        <!-- CONFIGURAÇÃO DE E-MAIL -->
+        <div id="config-email-section" style="margin-top:48px;padding-top:32px;border-top:2px solid var(--gray-100)">
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">📧 Notificações por E-mail</h3>
+          <p style="font-size:13px;color:var(--gray-400);margin-bottom:16px">Configure o Gmail (ou outro SMTP) para enviar boletos, credenciais e avisos de vistoria aos inquilinos automaticamente.</p>
+
+          <div class="card" style="margin-bottom:16px">
+            <form id="form-email-config" onsubmit="return false">
+              <div class="form-grid">
+                <div class="form-group" style="grid-column:1/-1">
+                  <label class="form-label">URL do Sistema (link enviado nos e-mails)</label>
+                  <input class="form-control" id="email-appUrl" type="url" placeholder="https://seudominio.com ou http://localhost:3000">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Servidor SMTP</label>
+                  <input class="form-control" id="email-host" type="text" placeholder="smtp.gmail.com" value="smtp.gmail.com">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Porta</label>
+                  <input class="form-control" id="email-port" type="number" placeholder="465" value="465">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Usuário (e-mail remetente)</label>
+                  <input class="form-control" id="email-user" type="email" placeholder="seuemail@gmail.com">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Senha do app <a href="https://myaccount.google.com/apppasswords" target="_blank" style="font-size:11px;color:var(--primary)">(gerar senha de app Gmail)</a></label>
+                  <input class="form-control" id="email-pass" type="password" placeholder="••••••••••••••••" autocomplete="new-password">
+                </div>
+                <div class="form-group" style="grid-column:1/-1">
+                  <label class="form-label">Nome/e-mail do remetente (opcional)</label>
+                  <input class="form-control" id="email-from" type="text" placeholder="Gestão de Imóveis <seuemail@gmail.com>">
+                </div>
+              </div>
+            </form>
+            <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="salvarConfigEmail()">💾 Salvar Configuração</button>
+              <button class="btn btn-ghost" onclick="testarEmail()">📤 Enviar E-mail de Teste</button>
+              <span id="email-status" style="font-size:12px;color:var(--gray-400);align-self:center"></span>
+            </div>
+          </div>
+        </div>
+
         <!-- BACKUP E RECUPERAÇÃO -->
         <div id="config-backup-section" style="margin-top:48px;padding-top:32px;border-top:2px solid var(--gray-100)">
           <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">🗄️ Backup e Recuperação de Dados</h3>
@@ -825,6 +871,56 @@
 
       </div><!-- /max-width:780px -->
     </div><!-- /page-config -->
+
+    <!-- ══ AUDITORIA ══ -->
+    <div id="page-auditoria" class="page">
+      <div class="table-wrapper">
+        <div class="table-header">
+          <h3>🔍 Auditoria — Histórico de Alterações</h3>
+          <span id="audit-count" style="font-size:13px;color:var(--gray-400)"></span>
+        </div>
+
+        <!-- Filtros -->
+        <div style="display:flex;flex-wrap:wrap;gap:10px;padding:12px 16px;border-bottom:1px solid var(--gray-100);background:var(--gray-50)">
+          <select id="audit-fil-acao" onchange="_auditFiltrar()" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;background:#fff">
+            <option value="">Todas as ações</option>
+            <option value="criar">Criação</option>
+            <option value="editar">Edição</option>
+            <option value="excluir">Exclusão</option>
+          </select>
+          <select id="audit-fil-entidade" onchange="_auditFiltrar()" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;background:#fff">
+            <option value="">Todos os módulos</option>
+            <option value="inquilino">Inquilinos</option>
+            <option value="imovel">Imóveis</option>
+            <option value="contrato">Contratos</option>
+            <option value="financeiro">Financeiro</option>
+            <option value="manutencao">Manutenção</option>
+          </select>
+          <select id="audit-fil-usuario" onchange="_auditFiltrar()" style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;background:#fff">
+            <option value="">Todos os usuários</option>
+          </select>
+          <input id="audit-fil-busca" type="text" placeholder="Buscar por nome..." oninput="_auditFiltrar()"
+            style="padding:6px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;min-width:160px">
+          <button class="btn btn-ghost" onclick="auditLimparFiltros()" style="font-size:13px">✕ Limpar</button>
+        </div>
+
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Data / Hora</th>
+                <th>Usuário</th>
+                <th>Ação</th>
+                <th>Módulo</th>
+                <th>Registro</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="audit-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div><!-- /page-auditoria -->
 
   </div><!-- /content -->
 </main>
@@ -1164,8 +1260,8 @@
             <input name="telefone" type="text" placeholder="(00) 0000-0000">
           </div>
           <div class="form-group">
-            <label>E-mail</label>
-            <input name="email" type="email">
+            <label>E-mail *</label>
+            <input name="email" id="inq-campo-email" type="email" placeholder="exemplo@email.com">
           </div>
           <div class="form-group form-col-2">
             <label>Observações</label>
@@ -1295,8 +1391,10 @@
       </div>
 
     </div>
-    <div class="modal-footer">
+    <div class="modal-footer" style="flex-wrap:wrap;gap:8px">
       <button class="btn btn-ghost" onclick="closeModal('modal-inq-ficha')">Fechar</button>
+      <button class="btn btn-ghost" id="ficha-btn-email-vistoria" onclick="_fichaNotificarVistoria()" title="Envia e-mail ao inquilino informando que a vistoria está disponível">📋 Notificar Vistoria</button>
+      <button class="btn btn-ghost" id="ficha-btn-email-acesso" onclick="_fichaNotificarAcesso()" title="Reenvia e-mail com as credenciais de acesso ao portal">🔑 Reenviar Acesso</button>
       <button class="btn btn-primary" onclick="closeModal('modal-inq-ficha'); openInquilino(parseInt(document.getElementById('ficha-nome').dataset.id))">Editar</button>
     </div>
   </div>
@@ -1691,6 +1789,35 @@
 </div>
 
 <!-- ══ MODAL USUÁRIO ══ -->
+<!-- ══ MODAL DETALHE AUDITORIA ══ -->
+<div class="modal-overlay" id="modal-audit-det">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <h3 id="audit-det-title">Detalhe da Alteração</h3>
+      <button class="modal-close" onclick="closeModal('modal-audit-det')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="audit-det-meta" style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;font-size:13px;background:var(--gray-50);padding:12px 16px;border-radius:8px;color:var(--gray-600)">
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--gray-50)">
+              <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--gray-500);border-bottom:1px solid var(--gray-100);width:25%">Campo</th>
+              <th style="padding:8px 10px;text-align:left;font-size:12px;color:#dc2626;border-bottom:1px solid var(--gray-100)">Antes</th>
+              <th style="padding:8px 10px;text-align:left;font-size:12px;color:#16a34a;border-bottom:1px solid var(--gray-100)">Depois</th>
+            </tr>
+          </thead>
+          <tbody id="audit-det-table"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-audit-det')">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-usuario">
   <div class="modal modal-wide">
     <div class="modal-head">
@@ -2181,12 +2308,12 @@
   function loadScript(src) {
     return new Promise((res, rej) => {
       const s = document.createElement('script');
-      s.src = src; s.onload = res; s.onerror = rej;
+      s.src = src + '&t=' + Date.now(); s.onload = res; s.onerror = rej;
       document.body.appendChild(s);
     });
   }
-  await loadScript('js/data.js?v=7');
-  await loadScript('js/app.js?v=7');
+  await loadScript('js/data.js?v=10');
+  await loadScript('js/app.js?v=17');
   const el = document.getElementById('topbar-date');
   if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 })();

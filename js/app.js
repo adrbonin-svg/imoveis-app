@@ -459,6 +459,7 @@ const PAGINAS_PERM = [
   { id: 'manutencao',   label: 'Manutenção',     icon: '🔧', acoes: ['criar','editar','excluir'] },
   { id: 'relatorios',   label: 'Relatórios',     icon: '📋', acoes: [] },
   { id: 'config',       label: 'Configurações',  icon: '⚙️',  acoes: ['editar'] },
+  { id: 'auditoria',    label: 'Auditoria',      icon: '🔍', acoes: [] },
 ];
 
 // Verifica se o usuário logado pode executar uma ação em determinada página
@@ -589,7 +590,7 @@ function navigate(page) {
     dashboard: 'Dashboard', inquilinos: 'Inquilinos', imoveis: 'Imóveis',
     contratos: 'Contratos', financeiro: 'Financeiro', manutencao: 'Manutenção',
     relatorios: 'Relatórios', config: 'Configurações', usuarios: 'Usuários',
-    portal: 'Meu Portal',
+    portal: 'Meu Portal', auditoria: 'Auditoria',
   }[page] || page;
   renderPage(page);
 }
@@ -604,6 +605,7 @@ function renderPage(page) {
   else if (page === 'config')     renderConfig();
   else if (page === 'usuarios')   renderUsuarios();
   else if (page === 'portal')     renderPortal();
+  else if (page === 'auditoria')  renderAuditoria();
 }
 
 // ── DASHBOARD ──────────────────────────────────────────
@@ -1170,6 +1172,7 @@ function renderInquilinos() {
               <button class="btn btn-primary btn-sm" onclick="openInquilinoFicha(${i.id})">Ver Ficha</button>
               ${_podeAcao('inquilinos','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openInquilino(${i.id})">Editar</button>` : ''}
               ${_podeAcao('inquilinos','editar') ? `<button class="btn btn-ghost btn-sm" onclick="recriarAcessoInquilino(${i.id})" title="Criar ou resetar login/senha usando o CPF">🔑 Acesso</button>` : ''}
+              <button class="btn btn-ghost btn-sm" style="color:#25D366" onclick="enviarAcessoWhatsapp(${i.id})" title="Enviar login e senha via WhatsApp">📱 Acesso</button>
               ${_podeAcao('inquilinos','excluir') ? `<button class="btn btn-danger btn-sm" onclick="deleteInquilino(${i.id})">Excluir</button>` : ''}
             </div>
           </td>
@@ -1395,27 +1398,29 @@ function saveInquilino() {
     _fieldError('inq-campo-nome', 'Nome é obrigatório');
     return;
   }
-  if (cpfLimpo) {
-    // Valida formato somente se o CPF foi preenchido
-    if (tipoPessoa === 'juridica') {
-      if (!_validarCNPJ(cpfLimpo)) { _fieldError('inq-campo-cpf', 'CNPJ inválido — verifique os dígitos'); return; }
-    } else {
-      if (!_validarCPF(cpfLimpo)) { _fieldError('inq-campo-cpf', 'CPF inválido — verifique os dígitos'); return; }
-    }
-  } else if (!id) {
-    // Novo inquilino: CPF é obrigatório
+  if (!cpfLimpo) {
     _fieldError('inq-campo-cpf', tipoPessoa === 'juridica' ? 'CNPJ é obrigatório' : 'CPF é obrigatório');
     return;
   }
+  if (tipoPessoa === 'juridica') {
+    if (!_validarCNPJ(cpfLimpo)) { _fieldError('inq-campo-cpf', 'CNPJ inválido — verifique os dígitos'); return; }
+  } else {
+    if (!_validarCPF(cpfLimpo)) { _fieldError('inq-campo-cpf', 'CPF inválido — verifique os dígitos'); return; }
+  }
   if (!celLimpo && !id) {
-    // Novo inquilino: celular é obrigatório
     _fieldError('inq-campo-celular', 'Celular é obrigatório');
+    return;
+  }
+  if (!data.email) {
+    _fieldError('inq-campo-email', 'E-mail é obrigatório');
     return;
   }
 
   if (id) {
     const idx = DB.inquilinos.findIndex(x => x.id === id);
+    const antes = { ...DB.inquilinos[idx] };
     DB.inquilinos[idx] = { ...DB.inquilinos[idx], ...data };
+    _auditLog('editar', 'inquilino', id, data.nome, antes, DB.inquilinos[idx]);
   } else {
     DB.inquilinos.push({ id: nextId(DB.inquilinos), ...data });
     // Auto-criar acesso para o inquilino (CPF como login e senha)
@@ -1432,7 +1437,10 @@ function saveInquilino() {
         permissoes:  { portal: { ver: true } },
         ativo:       true,
       });
+      // Envia e-mail de boas-vindas com credenciais (em background)
+      if (data.email) notificarAcessoCriado(novoInq.id, cpfLimpo, cpfLimpo);
     }
+    _auditLog('criar', 'inquilino', novoInq.id, data.nome, null, novoInq);
   }
   saveData();
   closeModal('modal-inquilino');
@@ -1449,6 +1457,7 @@ function saveInquilino() {
 function deleteInquilino(id) {
   if (!confirm_('Excluir este inquilino?')) return;
   const inq = DB.inquilinos.find(x => x.id === id);
+  _auditLog('excluir', 'inquilino', id, inq?.nome || String(id), inq, null);
   // Encerra contratos ATIVO vinculados a este inquilino
   DB.contratos.forEach(c => {
     if ((c.inquilinoId === id || (inq && c.inquilino === inq.nome)) && c.status === 'ATIVO') {
@@ -1496,6 +1505,25 @@ function recriarAcessoInquilino(inqId) {
   }
   saveData();
   renderInquilinos();
+  // Envia e-mail com as credenciais (em background)
+  if (inq.email) notificarAcessoCriado(inqId, cpfLimpo, cpfLimpo);
+}
+
+function enviarAcessoWhatsapp(inqId) {
+  const inq = DB.inquilinos.find(x => x.id === inqId);
+  if (!inq) return;
+  const fone = (inq.celular || inq.telefone || '').replace(/\D/g, '');
+  if (!fone) { toast('Celular do inquilino não cadastrado', 'error'); return; }
+  const u = DB.usuarios.find(x => x.perfil === 'inquilino' && x.inquilinoId === inqId && x.ativo);
+  if (!u) { toast('Inquilino não possui acesso criado — clique em 🔑 Acesso primeiro', 'error'); return; }
+  const appUrl = DB.config.email?.appUrl || window.location.origin;
+  const texto =
+    `Olá ${inq.nome}, segue seu acesso ao portal do inquilino.\n\n` +
+    `🔗 Link: ${appUrl}\n` +
+    `👤 Usuário: ${u.usuario}\n` +
+    `🔑 Senha: ${u.senha}\n\n` +
+    `Em caso de dúvidas, entre em contato conosco.`;
+  window.open(`https://wa.me/55${fone}?text=${encodeURIComponent(texto)}`, '_blank');
 }
 
 // Reseta login e senha de um usuário inquilino para o CPF (chamado da aba Usuários)
@@ -1999,9 +2027,13 @@ function saveImovel() {
   if (!data.nome) { toast('Nome do imóvel é obrigatório', 'error'); return; }
   if (id) {
     const idx = DB.imoveis.findIndex(x => x.id === id);
+    const antes = { ...DB.imoveis[idx] };
     DB.imoveis[idx] = { ...DB.imoveis[idx], ...data };
+    _auditLog('editar', 'imovel', id, data.nome, antes, DB.imoveis[idx]);
   } else {
     DB.imoveis.push({ id: nextId(DB.imoveis), ...data });
+    const novoImo = DB.imoveis[DB.imoveis.length - 1];
+    _auditLog('criar', 'imovel', novoImo.id, data.nome, null, novoImo);
   }
   saveData();
   closeModal('modal-imovel');
@@ -2011,6 +2043,8 @@ function saveImovel() {
 
 function deleteImovel(id) {
   if (!confirm_('Excluir este imóvel?')) return;
+  const imo = DB.imoveis.find(x => x.id === id);
+  _auditLog('excluir', 'imovel', id, imo?.nome || String(id), imo, null);
   DB.imoveis = DB.imoveis.filter(x => x.id !== id);
   saveData();
   renderImoveis();
@@ -2131,6 +2165,7 @@ function renderContratos() {
           <td>
             <div class="actions">
               <button class="btn btn-ghost btn-sm" onclick="gerarContrato(${c.id})">📄 Gerar</button>
+              <button class="btn btn-ghost btn-sm" style="color:#25D366" onclick="enviarContratoWhatsapp(${c.id})" title="Enviar contrato via WhatsApp">📱 WhatsApp</button>
               ${_podeAcao('contratos','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openContrato(${c.id})">Editar</button>` : ''}
               ${_podeAcao('contratos','excluir') ? `<button class="btn btn-danger btn-sm" onclick="deleteContrato(${c.id})">Excluir</button>` : ''}
             </div>
@@ -2415,11 +2450,15 @@ function saveContrato() {
   const oldImovel = id ? DB.contratos.find(x => x.id === id)?.imovel : null;
   if (id) {
     const idx = DB.contratos.findIndex(x => x.id === id);
+    const antes = { ...DB.contratos[idx] };
     // Preserva arquivo existente se não foi alterado
     if (!data.arquivo && DB.contratos[idx].arquivo) data.arquivo = DB.contratos[idx].arquivo;
     DB.contratos[idx] = { ...DB.contratos[idx], ...data };
+    _auditLog('editar', 'contrato', id, data.codigo, antes, DB.contratos[idx]);
   } else {
     DB.contratos.push({ id: nextId(DB.contratos), ...data });
+    const novoCt = DB.contratos[DB.contratos.length - 1];
+    _auditLog('criar', 'contrato', novoCt.id, data.codigo, null, novoCt);
   }
   // Atualiza status dos imóveis envolvidos
   _syncImovelStatus(data.imovel);
@@ -2587,7 +2626,9 @@ function gerarCaucaoContrato(c) {
 
 function deleteContrato(id) {
   if (!confirm_('Excluir este contrato?')) return;
-  const nomeImovel = DB.contratos.find(x => x.id === id)?.imovel;
+  const ct = DB.contratos.find(x => x.id === id);
+  _auditLog('excluir', 'contrato', id, ct?.codigo || String(id), ct, null);
+  const nomeImovel = ct?.imovel;
   DB.contratos = DB.contratos.filter(x => x.id !== id);
   _syncImovelStatus(nomeImovel);
   saveData();
@@ -3114,6 +3155,7 @@ function renderFinanceiro() {
                 ? `<button class="btn btn-primary btn-sm" onclick="openBaixa(${f.id})">💰 Baixar</button>`
                 : '';
             })()}
+            <button class="btn btn-ghost btn-sm" style="color:#25D366" onclick="enviarBoletoWhatsappDireto(${f.id})" title="Enviar via WhatsApp">📱</button>
             ${_podeAcao('financeiro','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openFinanceiro(${f.id})">Editar</button>` : ''}
             ${_podeAcao('financeiro','excluir') ? `<button class="btn btn-danger btn-sm" onclick="deleteFinanceiro(${f.id})">Excluir</button>` : ''}
           </div>
@@ -3301,10 +3343,14 @@ function saveFinanceiro() {
   if (!data.dataPagamento || !data.contrato) { toast('Data e contrato são obrigatórios', 'error'); return; }
   if (id) {
     const idx = DB.financeiro.findIndex(x => x.id === id);
+    const antes = { ...DB.financeiro[idx] };
     if (!data.comprovante && DB.financeiro[idx].comprovante) data.comprovante = DB.financeiro[idx].comprovante;
     DB.financeiro[idx] = { ...DB.financeiro[idx], ...data };
+    _auditLog('editar', 'financeiro', id, data.contrato, antes, DB.financeiro[idx]);
   } else {
     DB.financeiro.push({ id: nextId(DB.financeiro), ...data });
+    const novoFin = DB.financeiro[DB.financeiro.length - 1];
+    _auditLog('criar', 'financeiro', novoFin.id, data.contrato, null, novoFin);
   }
   saveData();
   closeModal('modal-financeiro');
@@ -3321,6 +3367,8 @@ function saveFinanceiro() {
 
 function deleteFinanceiro(id) {
   if (!confirm_('Excluir este registro?')) return;
+  const fin = DB.financeiro.find(x => x.id === id);
+  _auditLog('excluir', 'financeiro', id, fin?.contrato || String(id), fin, null);
   DB.financeiro = DB.financeiro.filter(x => x.id !== id);
   saveData();
   renderFinanceiro();
@@ -3419,6 +3467,7 @@ function salvarBaixa() {
   const idx = DB.financeiro.findIndex(x => x.id === _baixaFinId);
   if (idx < 0) return;
   const f = DB.financeiro[idx];
+  const antesBaixa = { ...f };
   DB.financeiro[idx] = {
     ...f,
     valorRecebido,
@@ -3429,6 +3478,7 @@ function salvarBaixa() {
     comprovante:  null, // limpa campo antigo
     baixaManual:  true,
   };
+  _auditLog('editar', 'financeiro', _baixaFinId, f.contrato, antesBaixa, DB.financeiro[idx]);
   saveData();
   closeModal('modal-baixa');
   renderFinanceiro();
@@ -3731,9 +3781,13 @@ function saveManutencao() {
   if (!data.imovel) { toast('Imóvel é obrigatório', 'error'); return; }
   if (id) {
     const idx = DB.manutencao.findIndex(x => x.id === id);
+    const antes = { ...DB.manutencao[idx] };
     DB.manutencao[idx] = { ...DB.manutencao[idx], ...data };
+    _auditLog('editar', 'manutencao', id, data.imovel, antes, DB.manutencao[idx]);
   } else {
     DB.manutencao.push({ id: nextId(DB.manutencao), ...data });
+    const novoMan = DB.manutencao[DB.manutencao.length - 1];
+    _auditLog('criar', 'manutencao', novoMan.id, data.imovel, null, novoMan);
   }
   saveData();
   closeModal('modal-manutencao');
@@ -3743,6 +3797,8 @@ function saveManutencao() {
 
 function deleteManutencao(id) {
   if (!confirm_('Excluir este registro?')) return;
+  const man = DB.manutencao.find(x => x.id === id);
+  _auditLog('excluir', 'manutencao', id, man?.imovel || String(id), man, null);
   DB.manutencao = DB.manutencao.filter(x => x.id !== id);
   saveData();
   renderManutencao();
@@ -4063,7 +4119,7 @@ function renderUsuarios() {
       <td>${u.ativo ? '<span class="badge badge-green">Ativo</span>' : '<span class="badge badge-red">Inativo</span>'}</td>
       <td style="white-space:nowrap">
         ${!isInq ? `<button class="btn btn-ghost btn-sm" onclick="openUsuario(${u.id})">Editar</button>` : ''}
-        ${!isMe && !isInq ? `<button class="btn btn-danger btn-sm" onclick="deleteUsuario(${u.id})">Excluir</button>` : ''}
+        ${!isMe ? `<button class="btn btn-danger btn-sm" onclick="deleteUsuario(${u.id})">Excluir</button>` : ''}
         ${isMe ? '<span style="font-size:11px;color:var(--gray-400)">(você)</span>' : ''}
         ${isInq ? `<button class="btn btn-ghost btn-sm" onclick="_toggleInquilinoAcesso(${u.id})">${u.ativo ? '🔒 Desativar' : '🔓 Ativar'}</button>` : ''}
         ${isInq ? `<button class="btn btn-ghost btn-sm" onclick="resetarSenhaInquilino(${u.id})" title="Resetar login e senha para o CPF do inquilino">🔑 Resetar</button>` : ''}
@@ -4594,6 +4650,18 @@ async function gerarBoleto(finId) {
     abrirModalBoleto(DB.financeiro[idx]);
     toast('Boleto gerado com sucesso!', 'success');
 
+    // 7) Envia e-mail de notificação ao inquilino (em background)
+    if (inq?.email) {
+      const finAtual = DB.financeiro[idx];
+      _enviarEmailInquilino('boleto', inq.id, {
+        contrato:   f.contrato,
+        valor:      (finAtual.totalGeral || finAtual.valorContrato || 0)
+                      .toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+        vencimento: new Date(f.dataPagamento + 'T12:00:00').toLocaleDateString('pt-BR'),
+        linkBoleto: finAtual.boletoPdfUrl || '',
+      }).then(ok => { if (ok) toast('E-mail do boleto enviado ao inquilino!', 'success'); });
+    }
+
   } catch (err) {
     toast('Erro de rede ao gerar boleto', 'error');
     if (btn) { btn.textContent = '🏦 Gerar'; btn.disabled = false; }
@@ -4660,6 +4728,42 @@ function enviarBoletoWhatsapp() {
     `Valor: ${fmt(f.totalGeral || f.valorContrato)}\n` +
     `Linha digitável:\n${f.boletoLinha || ''}\n\n` +
     (f.asaasPaymentId ? `PDF: ${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf` : '')
+  );
+  window.open(`https://wa.me/55${fone}?text=${msg}`, '_blank');
+}
+
+function enviarBoletoWhatsappDireto(finId) {
+  const f = DB.financeiro.find(x => x.id === finId);
+  if (!f) return;
+  const contrato = DB.contratos.find(c => c.codigo === f.contrato);
+  const inq = contrato ? DB.inquilinos.find(i => i.nome === contrato.inquilino) : null;
+  const fone = (inq?.celular || inq?.telefone || '').replace(/\D/g, '');
+  if (!fone) { toast('Celular do inquilino não cadastrado', 'error'); return; }
+  const benef = DB.config.asaas?.nomeBeneficiario || DB.config.locador?.nome || '';
+  let texto = `Olá ${f.inquilino || 'inquilino'}, segue informações do pagamento referente ao aluguel de ${fmtDate(f.dataPagamento)}.\n\n`;
+  if (benef) texto += `Beneficiário: ${benef}\n`;
+  texto += `Valor: ${fmt(f.totalGeral || f.valorContrato)}\n`;
+  texto += `Contrato: ${f.contrato}\n`;
+  if (f.boletoLinha) texto += `\nLinha digitável:\n${f.boletoLinha}\n`;
+  if (f.asaasPaymentId) texto += `\nPDF do boleto:\n${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf`;
+  window.open(`https://wa.me/55${fone}?text=${encodeURIComponent(texto)}`, '_blank');
+}
+
+function enviarContratoWhatsapp(ctId) {
+  const c = DB.contratos.find(x => x.id === ctId);
+  if (!c) return;
+  const inq = c.inquilino ? DB.inquilinos.find(i => i.nome === c.inquilino) : null;
+  const fone = (inq?.celular || inq?.telefone || '').replace(/\D/g, '');
+  if (!fone) { toast('Celular do inquilino não cadastrado', 'error'); return; }
+  const appUrl = DB.config.email?.appUrl || window.location.origin;
+  const msg = encodeURIComponent(
+    `Olá ${c.inquilino || 'inquilino'}, segue as informações do seu contrato de locação.\n\n` +
+    `Contrato: ${c.codigo}\n` +
+    `Imóvel: ${c.imovel}\n` +
+    `Vigência: ${fmtDate(c.dataInicio)} a ${fmtDate(c.dataTermino)}\n` +
+    `Valor Mensal: ${fmt(c.valorMensal)}\n` +
+    `Status: ${c.status}\n\n` +
+    `Acesse o portal do inquilino em:\n${appUrl}`
   );
   window.open(`https://wa.me/55${fone}?text=${msg}`, '_blank');
 }
@@ -5200,6 +5304,9 @@ function renderConfig() {
   renderCamposExtrasConfig();
   const backupSection = document.getElementById('config-backup-section');
   if (backupSection) backupSection.style.display = (_currentUser?.perfil === 'inquilino') ? 'none' : '';
+  const emailSection = document.getElementById('config-email-section');
+  if (emailSection) emailSection.style.display = (_currentUser?.perfil === 'inquilino') ? 'none' : '';
+  carregarConfigEmail();
   const loc = DB.config.locador || {};
   ['nome','estadoCivil','profissao','rg','cpf','endereco','telefone','email'].forEach(k => {
     const el = document.getElementById('cfg-locador-'+k);
@@ -5982,6 +6089,322 @@ function _portalRenderBoletos(inq) {
       ${obsHtml}
     </div>`;
   }).join('');
+}
+
+// ── AUDITORIA (AUDIT TRAIL) ────────────────────────────
+
+// Remove dados binários grandes antes de gravar no log
+function _sanitizeAudit(obj) {
+  if (!obj) return null;
+  const s = JSON.parse(JSON.stringify(obj));
+  if (Array.isArray(s.documentos))     s.documentos     = s.documentos.map(d => ({ ...d, dados: '[arquivo]' }));
+  if (Array.isArray(s.comprovantes))   s.comprovantes   = s.comprovantes.map(c => ({ ...c, dados: '[arquivo]' }));
+  if (s.comprovante?.dados)            s.comprovante    = { ...s.comprovante, dados: '[arquivo]' };
+  if (Array.isArray(s.checklistFotos)) s.checklistFotos = s.checklistFotos.map(f => ({ ...f, dados: '[foto]' }));
+  if (Array.isArray(s.fotos))          s.fotos          = s.fotos.map(f => ({ ...f, dados: '[foto]' }));
+  if (s.arquivo?.dados)                s.arquivo        = { ...s.arquivo, dados: '[arquivo]' };
+  return s;
+}
+
+function _auditLog(acao, entidade, entidadeId, entidadeNome, dadosAntes, dadosDepois) {
+  if (!Array.isArray(DB.auditoria)) DB.auditoria = [];
+  DB.auditoria.unshift({
+    id:           `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+    timestamp:    new Date().toISOString(),
+    usuarioId:    _currentUser?.id   || null,
+    usuarioNome:  _currentUser?.nome || 'Sistema',
+    acao,         // 'criar' | 'editar' | 'excluir'
+    entidade,     // 'inquilino' | 'imovel' | 'contrato' | 'financeiro' | 'manutencao' | ...
+    entidadeId,
+    entidadeNome: entidadeNome || String(entidadeId),
+    dadosAntes:   _sanitizeAudit(dadosAntes),
+    dadosDepois:  _sanitizeAudit(dadosDepois),
+  });
+  if (DB.auditoria.length > 500) DB.auditoria.length = 500;
+}
+
+function _auditColecao(entidade) {
+  return { inquilino: DB.inquilinos, imovel: DB.imoveis, contrato: DB.contratos,
+           financeiro: DB.financeiro, manutencao: DB.manutencao,
+           manutencaoPreventiva: DB.manutencaoPreventiva }[entidade] || null;
+}
+
+function _auditRefresh(entidade) {
+  if (entidade === 'inquilino')            { renderInquilinos(); }
+  else if (entidade === 'imovel')          { renderImoveis(); _syncAllImoveisStatus(); }
+  else if (entidade === 'contrato')        { renderContratos(); }
+  else if (entidade === 'financeiro')      { renderFinanceiro(); renderDashboard(); }
+  else if (entidade === 'manutencao')      { renderManutencao(); }
+  else if (entidade === 'manutencaoPreventiva') { renderManutencao(); }
+  renderAuditoria();
+}
+
+function auditRestaurar(logId) {
+  const log = (DB.auditoria || []).find(l => l.id === logId);
+  if (!log || !log.dadosAntes) { toast('Nenhum estado anterior disponível para restaurar', 'error'); return; }
+  const col = _auditColecao(log.entidade);
+  if (!col) { toast('Coleção não encontrada para restaurar', 'error'); return; }
+
+  if (log.acao === 'excluir') {
+    if (!confirm_(`Restaurar ${log.entidade} "${log.entidadeNome}" que foi excluído?`)) return;
+    col.push({ ...log.dadosAntes });
+    _auditLog('editar', log.entidade, log.entidadeId, log.entidadeNome, null, log.dadosAntes);
+    saveData();
+    _auditRefresh(log.entidade);
+    toast(`"${log.entidadeNome}" restaurado com sucesso!`, 'success');
+  } else if (log.acao === 'editar') {
+    if (!confirm_(`Desfazer edição de "${log.entidadeNome}"? Os dados voltarão ao estado anterior à edição.`)) return;
+    const idx = col.findIndex(x => x.id === log.entidadeId);
+    if (idx < 0) { toast('Registro não encontrado — pode ter sido excluído', 'error'); return; }
+    const atual = JSON.parse(JSON.stringify(col[idx]));
+    col[idx] = { ...log.dadosAntes };
+    _auditLog('editar', log.entidade, log.entidadeId, log.entidadeNome, atual, log.dadosAntes);
+    saveData();
+    _auditRefresh(log.entidade);
+    toast(`Edição desfeita — "${log.entidadeNome}" restaurado!`, 'success');
+  }
+}
+
+function auditVerDetalhes(logId) {
+  const log = (DB.auditoria || []).find(l => l.id === logId);
+  if (!log) return;
+  const acaoLabel = { criar: 'Criação', editar: 'Edição', excluir: 'Exclusão' }[log.acao] || log.acao;
+  const entLabel  = { inquilino:'Inquilino', imovel:'Imóvel', contrato:'Contrato',
+    financeiro:'Financeiro', manutencao:'Manutenção', manutencaoPreventiva:'Prev. Preventiva' }[log.entidade] || log.entidade;
+  const fmt2 = v => v == null ? '<em style="color:#9ca3af">—</em>'
+    : typeof v === 'object' ? `<pre style="font-size:10px;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;background:#f9fafb;padding:8px;border-radius:6px;margin:0">${JSON.stringify(v, null, 2)}</pre>`
+    : String(v);
+
+  const campos = new Set([...Object.keys(log.dadosAntes || {}), ...Object.keys(log.dadosDepois || {})]);
+  const ignorar = new Set(['id','dados','checklistFotos','fotos','arquivo','documentos','comprovante','comprovantes']);
+  const linhas = [...campos].filter(k => !ignorar.has(k)).map(k => {
+    const antes  = log.dadosAntes?.[k];
+    const depois = log.dadosDepois?.[k];
+    const mudou  = JSON.stringify(antes) !== JSON.stringify(depois);
+    return `<tr style="${mudou ? 'background:#fef9c3' : ''}">
+      <td style="padding:6px 10px;font-size:12px;font-weight:600;color:#374151;white-space:nowrap">${k}</td>
+      <td style="padding:6px 10px;font-size:12px;color:#dc2626">${fmt2(antes)}</td>
+      <td style="padding:6px 10px;font-size:12px;color:#16a34a">${fmt2(depois)}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('audit-det-title').textContent = `${acaoLabel} — ${entLabel}: ${log.entidadeNome}`;
+  document.getElementById('audit-det-meta').innerHTML =
+    `<span>👤 ${log.usuarioNome}</span><span>🕐 ${new Date(log.timestamp).toLocaleString('pt-BR')}</span>`;
+  document.getElementById('audit-det-table').innerHTML = linhas ||
+    '<tr><td colspan="3" style="padding:16px;text-align:center;color:#9ca3af">Nenhum campo alterado</td></tr>';
+  document.getElementById('modal-audit-det').classList.add('open');
+}
+
+// Filtros de auditoria em memória
+let _auditFiltros = { entidade: '', acao: '', usuario: '', busca: '' };
+
+function renderAuditoria() {
+  if (!Array.isArray(DB.auditoria)) DB.auditoria = [];
+  const lista = DB.auditoria;
+
+  // Preenche filtro de usuários
+  const usuarios = [...new Set(lista.map(l => l.usuarioNome))].sort();
+  const selUsr = document.getElementById('audit-fil-usuario');
+  if (selUsr) {
+    const cur = selUsr.value;
+    selUsr.innerHTML = '<option value="">Todos os usuários</option>' +
+      usuarios.map(u => `<option value="${u}"${u===cur?' selected':''}>${u}</option>`).join('');
+  }
+
+  // Aplica filtros
+  const f = _auditFiltros;
+  const filtrados = lista.filter(l => {
+    if (f.entidade && l.entidade !== f.entidade) return false;
+    if (f.acao     && l.acao     !== f.acao)     return false;
+    if (f.usuario  && l.usuarioNome !== f.usuario) return false;
+    if (f.busca) {
+      const b = f.busca.toLowerCase();
+      if (!l.entidadeNome?.toLowerCase().includes(b) &&
+          !l.usuarioNome?.toLowerCase().includes(b))  return false;
+    }
+    return true;
+  });
+
+  const acaoBadge = { criar: 'badge-green', editar: 'badge-blue', excluir: 'badge-red' };
+  const entLabel  = { inquilino:'Inquilino', imovel:'Imóvel', contrato:'Contrato',
+    financeiro:'Financeiro', manutencao:'Manutenção', manutencaoPreventiva:'Manutenção Prev.' };
+
+  const tbody = document.getElementById('audit-tbody');
+  if (!tbody) return;
+
+  document.getElementById('audit-count').textContent =
+    `${filtrados.length} registro${filtrados.length !== 1 ? 's' : ''}`;
+
+  if (!filtrados.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:#9ca3af">Nenhum registro encontrado</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtrados.map(l => {
+    const podeRestore = (l.acao === 'excluir' || l.acao === 'editar') && l.dadosAntes;
+    const podeVer     = l.dadosAntes || l.dadosDepois;
+    return `<tr>
+      <td style="padding:10px 12px;font-size:12px;color:#6b7280;white-space:nowrap">
+        ${new Date(l.timestamp).toLocaleString('pt-BR')}
+      </td>
+      <td style="padding:10px 12px;font-size:12px;font-weight:600">${l.usuarioNome}</td>
+      <td style="padding:10px 12px">
+        <span class="badge ${acaoBadge[l.acao]||'badge-gray'}" style="font-size:11px">
+          ${{ criar:'+ Criação', editar:'✏ Edição', excluir:'✕ Exclusão' }[l.acao]||l.acao}
+        </span>
+      </td>
+      <td style="padding:10px 12px;font-size:12px">${entLabel[l.entidade]||l.entidade}</td>
+      <td style="padding:10px 12px;font-size:12px;font-weight:500">${l.entidadeNome}</td>
+      <td style="padding:10px 12px;white-space:nowrap;display:flex;gap:6px">
+        ${podeVer ? `<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="auditVerDetalhes('${l.id}')">🔎 Detalhes</button>` : ''}
+        ${podeRestore ? `<button class="btn btn-primary btn-sm" style="font-size:11px" onclick="auditRestaurar('${l.id}')">↩ Restaurar</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function _auditFiltrar() {
+  _auditFiltros.entidade = document.getElementById('audit-fil-entidade')?.value || '';
+  _auditFiltros.acao     = document.getElementById('audit-fil-acao')?.value     || '';
+  _auditFiltros.usuario  = document.getElementById('audit-fil-usuario')?.value  || '';
+  _auditFiltros.busca    = document.getElementById('audit-fil-busca')?.value    || '';
+  renderAuditoria();
+}
+
+function auditLimparFiltros() {
+  _auditFiltros = { entidade:'', acao:'', usuario:'', busca:'' };
+  ['audit-fil-entidade','audit-fil-acao','audit-fil-usuario','audit-fil-busca'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  renderAuditoria();
+}
+
+// ── NOTIFICAÇÕES POR E-MAIL ────────────────────────────
+
+async function _enviarEmailInquilino(template, inqId, dadosExtras = {}) {
+  const inq = DB.inquilinos.find(x => x.id === inqId);
+  if (!inq?.email) {
+    toast('Inquilino não possui e-mail cadastrado', 'error');
+    return false;
+  }
+  try {
+    const res = await fetch('/api/email/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template, to: inq.email, dados: { nome: inq.nome, ...dadosExtras } }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    return true;
+  } catch (err) {
+    toast(`Falha ao enviar e-mail: ${err.message}`, 'error');
+    return false;
+  }
+}
+
+async function notificarAcessoCriado(inqId, usuario, senha) {
+  const ok = await _enviarEmailInquilino('boasVindas', inqId, { usuario, senha });
+  if (ok) toast('E-mail de boas-vindas enviado!', 'success');
+}
+
+async function notificarVistoria(inqId, nomeImovel) {
+  const ok = await _enviarEmailInquilino('vistoria', inqId, { imovel: nomeImovel });
+  if (ok) toast('E-mail de vistoria enviado!', 'success');
+}
+
+// Chamadas pelos botões da ficha do inquilino
+function _fichaInqId() {
+  return parseInt(document.getElementById('ficha-nome').dataset.id);
+}
+
+async function _fichaNotificarVistoria() {
+  const inqId = _fichaInqId();
+  const inq   = DB.inquilinos.find(x => x.id === inqId);
+  if (!inq) return;
+  const contrato = DB.contratos.find(c => c.inquilino === inq.nome && c.status === 'ATIVO');
+  const imovel   = contrato?.imovel || inq.nome;
+  await notificarVistoria(inqId, imovel);
+}
+
+async function _fichaNotificarAcesso() {
+  const inqId = _fichaInqId();
+  const inq   = DB.inquilinos.find(x => x.id === inqId);
+  if (!inq) return;
+  const cpfLimpo = (inq.cpf || '').replace(/\D/g, '');
+  if (!cpfLimpo) { toast('CPF não cadastrado — necessário para gerar as credenciais', 'error'); return; }
+  await notificarAcessoCriado(inqId, cpfLimpo, cpfLimpo);
+}
+
+async function carregarConfigEmail() {
+  try {
+    const res  = await fetch('/api/email/config');
+    const data = await res.json();
+    const set  = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    set('email-host',   data.host);
+    set('email-port',   data.port);
+    set('email-user',   data.user);
+    set('email-from',   data.from);
+    set('email-appUrl', data.appUrl);
+    if (data.passMasked) {
+      const el = document.getElementById('email-pass');
+      if (el && !el.value) el.placeholder = data.passMasked;
+    }
+    const status = document.getElementById('email-status');
+    if (status) status.textContent = data.configured ? '✅ E-mail configurado' : '⚠️ Não configurado';
+  } catch {}
+}
+
+async function salvarConfigEmail() {
+  const get = id => document.getElementById(id)?.value.trim() || '';
+  const pass = get('email-pass');
+  if (!get('email-user')) { toast('Informe o e-mail do remetente', 'error'); return; }
+  if (!pass) { toast('Informe a senha do app', 'error'); return; }
+  try {
+    const res  = await fetch('/api/email/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        host:   get('email-host') || 'smtp.gmail.com',
+        port:   parseInt(get('email-port')) || 465,
+        secure: true,
+        user:   get('email-user'),
+        pass,
+        from:   get('email-from'),
+        appUrl: get('email-appUrl'),
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      toast('Configuração de e-mail salva!', 'success');
+      document.getElementById('email-pass').value = '';
+      carregarConfigEmail();
+    } else {
+      toast(data.error || 'Erro ao salvar', 'error');
+    }
+  } catch (err) {
+    toast('Erro de rede', 'error');
+  }
+}
+
+async function testarEmail() {
+  const status = document.getElementById('email-status');
+  if (status) status.textContent = '⏳ Enviando...';
+  try {
+    const res  = await fetch('/api/email/test', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      toast('E-mail de teste enviado! Verifique sua caixa de entrada.', 'success');
+      if (status) status.textContent = '✅ Teste enviado com sucesso';
+    } else {
+      toast(`Falha: ${data.error}`, 'error');
+      if (status) status.textContent = `❌ ${data.error}`;
+    }
+  } catch (err) {
+    toast('Erro de rede', 'error');
+    if (status) status.textContent = '❌ Erro de rede';
+  }
 }
 
 // ── BACKUP / RECUPERAÇÃO ────────────────────────────────

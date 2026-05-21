@@ -3,6 +3,7 @@ const express      = require('express');
 const path         = require('path');
 const fs           = require('fs');
 const { MongoClient } = require('mongodb');
+const nodemailer   = require('nodemailer');
 
 // ── MongoDB (persistência permanente entre deploys) ─────
 let _mongo = null;
@@ -24,14 +25,15 @@ async function getCol() {
 }
 
 const app = express();
+app.disable('etag');
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname), {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-    }
+  etag: false,
+  lastModified: false,
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
   }
 }));
 
@@ -40,6 +42,94 @@ const cfg = {
   key:  process.env.ASAAS_API_KEY || '',
   env:  process.env.ASAAS_ENV     || 'sandbox',
   webhookToken: process.env.ASAAS_WEBHOOK_TOKEN || '',
+};
+
+// ── E-mail (Nodemailer / Gmail SMTP) ────────────────────
+const emailCfg = {
+  host:    process.env.SMTP_HOST || 'smtp.gmail.com',
+  port:    parseInt(process.env.SMTP_PORT || '465'),
+  secure:  process.env.SMTP_SECURE !== 'false', // true para 465
+  user:    process.env.SMTP_USER  || '',
+  pass:    process.env.SMTP_PASS  || '',
+  from:    process.env.SMTP_FROM  || '',
+  appUrl:  process.env.APP_URL    || 'http://localhost:3000',
+};
+
+let _transporter = null;
+
+function getTransporter() {
+  if (!emailCfg.user || !emailCfg.pass) return null;
+  if (!_transporter) {
+    _transporter = nodemailer.createTransport({
+      host:   emailCfg.host,
+      port:   emailCfg.port,
+      secure: emailCfg.secure,
+      auth:   { user: emailCfg.user, pass: emailCfg.pass },
+    });
+  }
+  return _transporter;
+}
+
+async function enviarEmail({ to, subject, html }) {
+  const t = getTransporter();
+  if (!t) throw new Error('E-mail não configurado — acesse Configurações > E-mail');
+  if (!to) throw new Error('Destinatário não informado');
+  await t.sendMail({
+    from: emailCfg.from || emailCfg.user,
+    to,
+    subject,
+    html,
+  });
+}
+
+// Templates de e-mail
+const emailTemplates = {
+  boasVindas: ({ nome, usuario, senha, appUrl }) => ({
+    subject: '🏢 Seu acesso ao portal do inquilino',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:32px;background:#f9fafb;border-radius:12px">
+        <h2 style="color:#1a56db;margin-bottom:4px">Bem-vindo(a), ${nome}!</h2>
+        <p style="color:#6b7280;margin-top:0">Seu acesso ao portal do inquilino foi criado.</p>
+        <div style="background:#fff;border-radius:10px;padding:24px;margin:24px 0;border:1px solid #e5e7eb">
+          <p style="margin:0 0 12px;font-size:14px;color:#374151"><strong>🔗 Link de acesso:</strong><br>
+            <a href="${appUrl}" style="color:#1a56db">${appUrl}</a>
+          </p>
+          <p style="margin:0 0 12px;font-size:14px;color:#374151"><strong>👤 Usuário:</strong> ${usuario}</p>
+          <p style="margin:0;font-size:14px;color:#374151"><strong>🔑 Senha:</strong> ${senha}</p>
+        </div>
+        <p style="font-size:12px;color:#9ca3af">Recomendamos alterar a senha após o primeiro acesso. Em caso de dúvidas, entre em contato com a administração.</p>
+      </div>`,
+  }),
+
+  boleto: ({ nome, contrato, valor, vencimento, linkBoleto, appUrl }) => ({
+    subject: `🏦 Boleto disponível — ${contrato}`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:32px;background:#f9fafb;border-radius:12px">
+        <h2 style="color:#1a56db;margin-bottom:4px">Olá, ${nome}!</h2>
+        <p style="color:#6b7280;margin-top:0">Um novo boleto foi gerado para você.</p>
+        <div style="background:#fff;border-radius:10px;padding:24px;margin:24px 0;border:1px solid #e5e7eb">
+          <p style="margin:0 0 10px;font-size:14px;color:#374151"><strong>📄 Contrato:</strong> ${contrato}</p>
+          <p style="margin:0 0 10px;font-size:14px;color:#374151"><strong>💰 Valor:</strong> R$ ${valor}</p>
+          <p style="margin:0 0 20px;font-size:14px;color:#374151"><strong>📅 Vencimento:</strong> ${vencimento}</p>
+          ${linkBoleto ? `<a href="${linkBoleto}" style="display:inline-block;background:#1a56db;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">📥 Visualizar / Pagar Boleto</a>` : ''}
+        </div>
+        <p style="font-size:13px;color:#6b7280">Acesse o portal para ver seu histórico completo: <a href="${appUrl}" style="color:#1a56db">${appUrl}</a></p>
+      </div>`,
+  }),
+
+  vistoria: ({ nome, imovel, appUrl }) => ({
+    subject: '📋 Vistoria disponível para assinatura',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:32px;background:#f9fafb;border-radius:12px">
+        <h2 style="color:#1a56db;margin-bottom:4px">Olá, ${nome}!</h2>
+        <p style="color:#6b7280;margin-top:0">O checklist de vistoria do seu imóvel está disponível para revisão.</p>
+        <div style="background:#fff;border-radius:10px;padding:24px;margin:24px 0;border:1px solid #e5e7eb">
+          <p style="margin:0 0 20px;font-size:14px;color:#374151"><strong>🏠 Imóvel:</strong> ${imovel}</p>
+          <a href="${appUrl}" style="display:inline-block;background:#1a56db;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">📋 Acessar Portal e Revisar Vistoria</a>
+        </div>
+        <p style="font-size:12px;color:#9ca3af">Acesse com seu CPF como usuário e senha.</p>
+      </div>`,
+  }),
 };
 
 function asaasBase() {
@@ -213,6 +303,27 @@ app.post('/api/asaas/payment', async (req, res) => {
   try {
     const payment = await asaasRequest('POST', '/payments', req.body);
     if (payment.errors) return res.json({ ok: false, errors: payment.errors });
+
+    // Envia e-mail de notificação de boleto em background (não bloqueia a resposta)
+    const { emailInquilino, nomeInquilino, contrato } = req.body._emailMeta || {};
+    if (emailInquilino && emailCfg.user) {
+      const valor    = payment.value?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '—';
+      const venc     = payment.dueDate
+        ? new Date(payment.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')
+        : '—';
+      const { subject, html } = emailTemplates.boleto({
+        nome: nomeInquilino || 'Inquilino',
+        contrato: contrato || payment.description || '—',
+        valor,
+        vencimento: venc,
+        linkBoleto: payment.bankSlipUrl || payment.invoiceUrl || '',
+        appUrl: emailCfg.appUrl,
+      });
+      enviarEmail({ to: emailInquilino, subject, html })
+        .then(() => console.log(`[Email] Boleto enviado para ${emailInquilino}`))
+        .catch(e => console.error('[Email] Falha ao enviar boleto:', e.message));
+    }
+
     res.json({ ok: true, payment });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -276,6 +387,72 @@ app.get('/api/asaas/payment/:id/pdf', async (req, res) => {
     res.redirect(pdfUrl);
   } catch (err) {
     res.status(500).send(`Erro ao buscar boleto: ${err.message}`);
+  }
+});
+
+// ── E-mail: configuração ────────────────────────────────
+app.get('/api/email/config', (req, res) => {
+  res.json({
+    configured: !!(emailCfg.user && emailCfg.pass),
+    host:   emailCfg.host,
+    port:   emailCfg.port,
+    secure: emailCfg.secure,
+    user:   emailCfg.user,
+    from:   emailCfg.from,
+    appUrl: emailCfg.appUrl,
+    passMasked: emailCfg.pass ? '••••••••' : '',
+  });
+});
+
+app.post('/api/email/config', (req, res) => {
+  const { host, port, secure, user, pass, from, appUrl } = req.body;
+  if (!user || !pass) return res.status(400).json({ ok: false, error: 'Usuário e senha são obrigatórios' });
+
+  emailCfg.host   = host   || 'smtp.gmail.com';
+  emailCfg.port   = parseInt(port || '465');
+  emailCfg.secure = secure !== false && secure !== 'false';
+  emailCfg.user   = user.trim();
+  emailCfg.pass   = pass.trim();
+  emailCfg.from   = (from || user).trim();
+  emailCfg.appUrl = (appUrl || emailCfg.appUrl).trim();
+  _transporter = null; // força recriação com novos dados
+
+  const vars = {
+    SMTP_HOST:   emailCfg.host,
+    SMTP_PORT:   String(emailCfg.port),
+    SMTP_SECURE: String(emailCfg.secure),
+    SMTP_USER:   emailCfg.user,
+    SMTP_PASS:   emailCfg.pass,
+    SMTP_FROM:   emailCfg.from,
+    APP_URL:     emailCfg.appUrl,
+  };
+  try { writeEnvFile(vars); } catch (e) { /* ignora em ambientes read-only */ }
+  res.json({ ok: true });
+});
+
+app.post('/api/email/test', async (req, res) => {
+  try {
+    await enviarEmail({
+      to: emailCfg.user,
+      subject: '✅ Teste de e-mail — Sistema de Imóveis',
+      html: '<p>E-mail de teste enviado com sucesso! Sua configuração está funcionando.</p>',
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── E-mail: envio ───────────────────────────────────────
+app.post('/api/email/send', async (req, res) => {
+  try {
+    const { template, to, dados } = req.body;
+    if (!emailTemplates[template]) return res.status(400).json({ ok: false, error: 'Template inválido' });
+    const { subject, html } = emailTemplates[template]({ ...dados, appUrl: emailCfg.appUrl });
+    await enviarEmail({ to, subject, html });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
