@@ -310,7 +310,7 @@ function renderReajusteContratos({ todos, melhor }) {
 
   const now = new Date();
   const em30 = new Date(); em30.setDate(em30.getDate() + 30);
-  const vencendo = DB.contratos.filter(c => {
+  const vencendo = _myData(DB.contratos).filter(c => {
     if (!c.dataTermino || c.status !== 'ATIVO') return false;
     const dt = new Date(c.dataTermino + 'T12:00:00');
     return dt >= now && dt <= em30;
@@ -1102,7 +1102,7 @@ function renderInquilinos() {
   const statusFilter = _getActivePill('inq-filter-bar');
 
   // Helpers por inquilino
-  const _temContratoAtivo  = i => DB.contratos.some(c => c.inquilino === i.nome && c.status === 'ATIVO');
+  const _temContratoAtivo  = i => _myData(DB.contratos).some(c => c.inquilino === i.nome && c.status === 'ATIVO');
   const _temChecklist      = i => Array.isArray(i.checklistFotos) && i.checklistFotos.length > 0;
   const _precisaVistoria   = i => _temContratoAtivo(i) && !_temChecklist(i);
   const _ckNaoAssinado     = i => _temChecklist(i) && i.checklistFotos.some(ck => !ck.confirmadoEm);
@@ -1122,8 +1122,8 @@ function renderInquilinos() {
   }
 
   // Contagens para banners
-  const semVistoria    = DB.inquilinos.filter(i => _precisaVistoria(i)).length;
-  const semAssinatura  = DB.inquilinos.filter(i => _ckNaoAssinado(i)).length;
+  const semVistoria    = _myData(DB.inquilinos).filter(i => _precisaVistoria(i)).length;
+  const semAssinatura  = _myData(DB.inquilinos).filter(i => _ckNaoAssinado(i)).length;
   const alertEl = document.getElementById('inq-ck-alerta');
   if (alertEl) {
     let html = '';
@@ -1164,7 +1164,7 @@ function renderInquilinos() {
     ? `<tr><td colspan="8"><div class="empty"><div class="empty-icon">👤</div><p>Nenhum inquilino encontrado</p></div></td></tr>`
     : list.map(i => {
         const docs          = (i.documentos || []).length;
-        const contratosAtivos = DB.contratos.filter(c => c.inquilino === i.nome && c.status === 'ATIVO').length;
+        const contratosAtivos = _myData(DB.contratos).filter(c => c.inquilino === i.nome && c.status === 'ATIVO').length;
         const isPJ          = i.tipoPessoa === 'juridica';
         const temAtivo      = contratosAtivos > 0;
         const temCk         = _temChecklist(i);
@@ -1233,7 +1233,7 @@ function renderInquilinos() {
 function openInquilinoFicha(id) {
   const i = DB.inquilinos.find(x => x.id === id);
   if (!i) return;
-  const contratos = DB.contratos.filter(c => c.inquilino === i.nome);
+  const contratos = _myData(DB.contratos).filter(c => c.inquilino === i.nome);
   const docs = i.documentos || [];
 
   const isPJ = i.tipoPessoa === 'juridica';
@@ -1478,6 +1478,7 @@ function saveInquilino() {
     if (cpfLimpo && !jaExiste) {
       DB.usuarios.push({
         id:          nextId(DB.usuarios),
+        empresaId:   _currentEmpresaId(),
         nome:        data.nome,
         usuario:     cpfLimpo,
         senha:       cpfLimpo,
@@ -1542,6 +1543,7 @@ function recriarAcessoInquilino(inqId) {
   } else {
     DB.usuarios.push({
       id:          nextId(DB.usuarios),
+      empresaId:   _currentEmpresaId(),
       nome:        inq.nome,
       usuario:     cpfLimpo,
       senha:       cpfLimpo,
@@ -1592,7 +1594,7 @@ function resetarSenhaInquilino(userId) {
 
 // Abre modal para criar acesso manualmente para inquilino sem perfil
 function openCriarAcessoInquilino() {
-  const semAcesso = DB.inquilinos.filter(i =>
+  const semAcesso = _myData(DB.inquilinos).filter(i =>
     !DB.usuarios.some(u => u.perfil === 'inquilino' && u.inquilinoId === i.id && u.ativo)
   );
   const sel = document.getElementById('criar-acesso-inq-select');
@@ -1634,6 +1636,7 @@ function salvarAcessoInquilino() {
   } else {
     DB.usuarios.push({
       id:          nextId(DB.usuarios),
+      empresaId:   _currentEmpresaId(),
       nome:        inq.nome,
       usuario:     cpfLimpo,
       senha:       cpfLimpo,
@@ -1773,7 +1776,7 @@ async function downloadTodasFotos(imovelId) {
 function openImovelFicha(id) {
   const im = DB.imoveis.find(x => x.id === id);
   if (!im) return;
-  const contratos = DB.contratos.filter(c => c.imovel === im.nome && c.status === 'ATIVO');
+  const contratos = _myData(DB.contratos).filter(c => c.imovel === im.nome && c.status === 'ATIVO');
 
   // Header
   document.getElementById('ficha-imo-nome').textContent   = im.nome;
@@ -1844,8 +1847,8 @@ function renderPredios() {
     grid.innerHTML = '<div style="color:var(--gray-400);font-size:13px;padding:8px">Nenhum prédio cadastrado. Clique em "+ Novo Prédio" para começar.</div>';
     return;
   }
-  grid.innerHTML = DB.predios.map(p => {
-    const unidades = DB.imoveis.filter(i => i.predioId === p.id);
+  grid.innerHTML = _myData(DB.predios).map(p => {
+    const unidades = _myData(DB.imoveis).filter(i => i.predioId === p.id);
     const ocupados = unidades.filter(i => i.status === 'OCUPADO').length;
     const ativo    = _predioFiltro === p.id;
     return `
@@ -1917,7 +1920,7 @@ function savePredio() {
     const idx = DB.predios.findIndex(x => x.id === id);
     DB.predios[idx] = { ...DB.predios[idx], ...data };
   } else {
-    DB.predios.push({ id: nextId(DB.predios), ...data });
+    DB.predios.push({ id: nextId(DB.predios), empresaId: _currentEmpresaId(), ...data });
   }
   saveData();
   closeModal('modal-predio');
@@ -1926,7 +1929,7 @@ function savePredio() {
 }
 
 function deletePredio(id) {
-  const unidades = DB.imoveis.filter(i => i.predioId === id).length;
+  const unidades = _myData(DB.imoveis).filter(i => i.predioId === id).length;
   const msg = unidades > 0
     ? `Este prédio tem ${unidades} unidade(s) vinculada(s). Deseja excluir mesmo assim?`
     : 'Excluir este prédio?';
@@ -2110,7 +2113,7 @@ function _syncImovelStatus(nomeImovel) {
   if (!imo) return;
   if (imo.status === 'EM MANUTENÇÃO') return; // não sobrescreve manutenção
   const todayStr = today();
-  const temAtivo = DB.contratos.some(c =>
+  const temAtivo = _myData(DB.contratos).some(c =>
     c.imovel === nomeImovel &&
     c.status === 'ATIVO' &&
     (!c.dataTermino || c.dataTermino >= todayStr)
@@ -2121,9 +2124,9 @@ function _syncImovelStatus(nomeImovel) {
 // Sincroniza todos os imóveis — chamado no carregamento e no dashboard
 function _syncAllImoveisStatus() {
   const todayStr = today();
-  DB.imoveis.forEach(imo => {
+  _myData(DB.imoveis).forEach(imo => {
     if (imo.status === 'EM MANUTENÇÃO') return;
-    const temAtivo = DB.contratos.some(c =>
+    const temAtivo = _myData(DB.contratos).some(c =>
       c.imovel === imo.nome &&
       c.status === 'ATIVO' &&
       (!c.dataTermino || c.dataTermino >= todayStr)
@@ -2323,11 +2326,11 @@ function openContrato(id = null) {
   document.getElementById('modal-ct-title').textContent = id ? 'Editar Contrato' : 'Novo Contrato';
   // Ao editar mantém o imóvel já vinculado; ao criar novo, oculta os OCUPADOS
   const _imovelAtual = id ? DB.contratos.find(x => x.id === id)?.imovel : null;
-  const _imoveisOpts = DB.imoveis.filter(i => i.status !== 'OCUPADO' || i.nome === _imovelAtual);
+  const _imoveisOpts = _myData(DB.imoveis).filter(i => i.status !== 'OCUPADO' || i.nome === _imovelAtual);
   form.imovel.innerHTML = '<option value="">Selecione...</option>' +
     _imoveisOpts.map(i => `<option value="${i.nome}">${i.nome}</option>`).join('');
   form.inquilino.innerHTML = '<option value="">Selecione...</option>' +
-    DB.inquilinos.map(i => `<option value="${i.id}">${i.nome}</option>`).join('');
+    _myData(DB.inquilinos).map(i => `<option value="${i.id}">${i.nome}</option>`).join('');
   form.status.innerHTML = DB.config.statusContrato.map(s => `<option value="${s}">${s}</option>`).join('');
   _ctPopularSelCoInq();
   _ctRenderCoInquilinos();
@@ -3315,9 +3318,9 @@ function openFinanceiro(id = null) {
   _renderFinComprovanteZone();
   document.getElementById('modal-fin-title').textContent = id ? 'Editar Pagamento' : 'Registrar Pagamento';
   form.contrato.innerHTML = '<option value="">Selecione...</option>' +
-    DB.contratos.map(c => `<option value="${c.codigo}">${c.codigo} — ${c.imovel}</option>`).join('');
+    _myData(DB.contratos).map(c => `<option value="${c.codigo}">${c.codigo} — ${c.imovel}</option>`).join('');
   form.inquilino.innerHTML = '<option value="">Selecione...</option>' +
-    DB.inquilinos.map(i => `<option value="${i.nome}">${i.nome}</option>`).join('');
+    _myData(DB.inquilinos).map(i => `<option value="${i.nome}">${i.nome}</option>`).join('');
   const el = n => form.elements[n];
   if (!id) {
     el('dataPagamento').value = today();
@@ -3604,7 +3607,7 @@ function manInitPeriodo() {
   const selAno = document.getElementById('man-sel-ano');
   if (!selAno || selAno.options.length > 0) return;
   const anos = [...new Set([
-    ...DB.manutencao.filter(m => m.dataServico).map(m => new Date(m.dataServico + 'T12:00:00').getFullYear()),
+    ..._myData(DB.manutencao).filter(m => m.dataServico).map(m => new Date(m.dataServico + 'T12:00:00').getFullYear()),
     new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1
   ])].sort();
   anos.forEach(a => { const o = document.createElement('option'); o.value = a; o.textContent = a; selAno.appendChild(o); });
@@ -3787,7 +3790,7 @@ function openManutencao(id = null) {
   form.dataset.id = id || '';
   document.getElementById('modal-man-title').textContent = id ? 'Editar Manutenção' : 'Nova Manutenção';
   form.imovel.innerHTML = '<option value="">Selecione...</option>' +
-    DB.imoveis.map(i => `<option value="${i.nome}">${i.nome}</option>`).join('');
+    _myData(DB.imoveis).map(i => `<option value="${i.nome}">${i.nome}</option>`).join('');
   form.tipoServico.innerHTML = '<option value="">Selecione...</option>' +
     DB.config.tiposServico.map(t => `<option value="${t}">${t}</option>`).join('');
   form.status.innerHTML = DB.config.statusManutencao.map(s => `<option value="${s}">${s}</option>`).join('');
@@ -3910,7 +3913,7 @@ function renderManutencaoPreventiva() {
   const pill   = document.querySelector('#mprev-filter-bar .filter-pill.active')?.dataset.filter || 'todos';
   const todayStr = today();
 
-  let list = DB.manutencaoPreventiva.filter(item => {
+  let list = _myData(DB.manutencaoPreventiva).filter(item => {
     const st = _prevAlertStatus(item);
     if (pill === 'alerta')  return st === 'alerta';
     if (pill === 'vencida') return st === 'vencida';
@@ -3995,11 +3998,11 @@ function openManutencaoPreventiva(id = null) {
   document.getElementById('mprev-custom-group').style.display = 'none';
 
   const imovelSel = document.getElementById('mprev-campo-imovel');
-  const predioOpts = (DB.predios || []).length > 0
-    ? `<optgroup label="🏢 Prédios">${(DB.predios || []).map(p => `<option value="Prédio: ${p.nome}">🏢 ${p.nome}</option>`).join('')}</optgroup>`
+  const predioOpts = _myData(DB.predios || []).length > 0
+    ? `<optgroup label="🏢 Prédios">${_myData(DB.predios || []).map(p => `<option value="Prédio: ${p.nome}">🏢 ${p.nome}</option>`).join('')}</optgroup>`
     : '';
-  const imovelOpts = DB.imoveis.length > 0
-    ? `<optgroup label="🏠 Unidades / Imóveis">${DB.imoveis.map(i => `<option value="${i.nome}">${i.nome}</option>`).join('')}</optgroup>`
+  const imovelOpts = _myData(DB.imoveis).length > 0
+    ? `<optgroup label="🏠 Unidades / Imóveis">${_myData(DB.imoveis).map(i => `<option value="${i.nome}">${i.nome}</option>`).join('')}</optgroup>`
     : '';
   imovelSel.innerHTML = predioOpts + imovelOpts;
 
@@ -4049,7 +4052,7 @@ function saveManutencaoPreventiva() {
     const idx = DB.manutencaoPreventiva.findIndex(x => x.id === id);
     DB.manutencaoPreventiva[idx] = { ...DB.manutencaoPreventiva[idx], ...data };
   } else {
-    DB.manutencaoPreventiva.push({ id: nextId(DB.manutencaoPreventiva), historico: [], ...data });
+    DB.manutencaoPreventiva.push({ id: nextId(DB.manutencaoPreventiva), empresaId: _currentEmpresaId(), historico: [], ...data });
   }
   saveData();
   closeModal('modal-mprev');
@@ -4133,7 +4136,7 @@ function openHistoricoPrev(id) {
 const ACAO_LABELS = { criar: 'Criar', editar: 'Editar', excluir: 'Excluir' };
 
 function renderUsuarios() {
-  const list = DB.usuarios;
+  const list = _isSuperMaster() ? DB.usuarios : DB.usuarios.filter(u => u.empresaId === _currentEmpresaId() && u.perfil !== 'supermaster');
   document.getElementById('usr-total').textContent    = list.length;
   document.getElementById('usr-admins').textContent   = list.filter(u => u.perfil === 'admin').length;
   document.getElementById('usr-ativos').textContent   = list.filter(u => u.ativo).length;
@@ -4314,7 +4317,7 @@ function saveUsuario() {
     DB.usuarios[idx] = { ...DB.usuarios[idx], ...upd };
     if (_currentUser?.id === id) { _currentUser = DB.usuarios[idx]; _mostrarApp(); }
   } else {
-    DB.usuarios.push({ id: nextId(DB.usuarios), nome, usuario, senha, perfil, permissoes, ativo });
+    DB.usuarios.push({ id: nextId(DB.usuarios), empresaId: _currentEmpresaId(), nome, usuario, senha, perfil, permissoes, ativo });
   }
   saveData();
   closeModal('modal-usuario');
@@ -4882,7 +4885,7 @@ const REL_TIPOS = {
         </select>
       </div>`,
     getData() {
-      let l = [...DB.imoveis];
+      let l = [..._myData(DB.imoveis)];
       const s = document.getElementById('rf-imo-status')?.value;
       if (s) l = l.filter(i => i.status === s);
       return l.map(i => [
@@ -4905,12 +4908,12 @@ const REL_TIPOS = {
         </select>
       </div>`,
     getData() {
-      let l = [...DB.inquilinos];
+      let l = [..._myData(DB.inquilinos)];
       const s = document.getElementById('rf-inq-status')?.value;
-      if (s === 'com-ativo') l = l.filter(i => DB.contratos.some(c => c.inquilino === i.nome && c.status === 'ATIVO'));
-      if (s === 'sem-ativo') l = l.filter(i => !DB.contratos.some(c => c.inquilino === i.nome && c.status === 'ATIVO'));
+      if (s === 'com-ativo') l = l.filter(i => _myData(DB.contratos).some(c => c.inquilino === i.nome && c.status === 'ATIVO'));
+      if (s === 'sem-ativo') l = l.filter(i => !_myData(DB.contratos).some(c => c.inquilino === i.nome && c.status === 'ATIVO'));
       return l.map(i => {
-        const ativos = DB.contratos.filter(c => c.inquilino === i.nome && c.status === 'ATIVO').length;
+        const ativos = _myData(DB.contratos).filter(c => c.inquilino === i.nome && c.status === 'ATIVO').length;
         return [i.nome, i.tipoPessoa === 'juridica' ? 'Jurídica' : 'Física',
           i.cpf || '—', i.celular || '—', i.email || '—', ativos, i.observacoes || '—'];
       });
@@ -4935,7 +4938,7 @@ const REL_TIPOS = {
         </select>
       </div>`,
     getData() {
-      let l = [...DB.contratos];
+      let l = [..._myData(DB.contratos)];
       const s  = document.getElementById('rf-ct-status')?.value;
       const im = document.getElementById('rf-ct-imovel')?.value;
       if (s)  l = l.filter(c => c.status === s);
@@ -4987,7 +4990,7 @@ const REL_TIPOS = {
         <input type="text" id="rf-fin-busca" placeholder="Buscar..." style="width:100%">
       </div>`,
     getData() {
-      let l = [...DB.financeiro];
+      let l = [..._myData(DB.financeiro)];
       const periodo = document.getElementById('rf-fin-periodo')?.value;
       if (periodo === 'mes') {
         const mes = parseInt(document.getElementById('rf-fin-mes')?.value);
@@ -5030,7 +5033,7 @@ const REL_TIPOS = {
         <select id="rf-man-imovel"><option value="">Todos</option></select>
       </div>`,
     getData() {
-      let l = [...DB.manutencao];
+      let l = [..._myData(DB.manutencao)];
       const s  = document.getElementById('rf-man-status')?.value;
       const im = document.getElementById('rf-man-imovel')?.value;
       if (s)  l = l.filter(m => m.status === s);
@@ -5076,14 +5079,14 @@ const REL_TIPOS = {
         </select>
       </div>`,
     getData() {
-      let finList = [...DB.financeiro];
+      let finList = [..._myData(DB.financeiro)];
       const periodo = document.getElementById('rf-res-periodo')?.value;
       if (periodo === 'mes') {
         const mes = parseInt(document.getElementById('rf-res-mes')?.value);
         const ano = parseInt(document.getElementById('rf-res-ano')?.value);
         finList = finList.filter(f => { const d = new Date(f.dataPagamento+'T12:00:00'); return d.getMonth()+1===mes && d.getFullYear()===ano; });
       }
-      let contratos = [...DB.contratos];
+      let contratos = [..._myData(DB.contratos)];
       const ctStatus = document.getElementById('rf-res-ct-status')?.value;
       if (ctStatus) contratos = contratos.filter(c => c.status === ctStatus);
       return contratos.map(c => {
@@ -5116,7 +5119,7 @@ function relInitFiltros() {
   ['rf-ct-imovel', 'rf-man-imovel'].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
-    DB.imoveis.forEach(i => {
+    _myData(DB.imoveis).forEach(i => {
       const opt = document.createElement('option');
       opt.value = i.nome; opt.textContent = i.nome;
       sel.appendChild(opt);
@@ -5709,9 +5712,9 @@ function ckVincularInquilino() {
   // Pré-seleciona inquilinos com contrato ativo neste imóvel
   const im = DB.imoveis.find(x => x.id === _ckImoId);
   if (im) {
-    const contratos = DB.contratos.filter(c => c.imovel === im.nome && c.status === 'ATIVO');
+    const contratos = _myData(DB.contratos).filter(c => c.imovel === im.nome && c.status === 'ATIVO');
     contratos.forEach(c => {
-      const inq = DB.inquilinos.find(i => i.nome === c.inquilino);
+      const inq = _myData(DB.inquilinos).find(i => i.nome === c.inquilino);
       if (inq) _ckInqSel.add(inq.id);
     });
   }
@@ -5722,7 +5725,7 @@ function ckVincularInquilino() {
 
 function _ckFiltrarInquilinos(busca) {
   const q     = (busca || '').toLowerCase();
-  const lista = DB.inquilinos.filter(i => i.ativo !== false && (!q || i.nome.toLowerCase().includes(q)));
+  const lista = _myData(DB.inquilinos).filter(i => i.ativo !== false && (!q || i.nome.toLowerCase().includes(q)));
 
   document.getElementById('ck-vinc-lista').innerHTML = lista.length === 0
     ? '<p style="color:var(--gray-400);font-size:13px;padding:8px">Nenhum inquilino encontrado</p>'
@@ -6009,7 +6012,7 @@ async function portalConfirmarChecklist(ckId, inqId) {
 function _portalRenderContratos(inq) {
   const el = document.getElementById('portal-ct-lista');
   if (!el) return;
-  const contratos = DB.contratos.filter(c => c.inquilino === inq.nome).sort((a,b) => (b.dataInicio||'').localeCompare(a.dataInicio||''));
+  const contratos = _myData(DB.contratos).filter(c => c.inquilino === inq.nome).sort((a,b) => (b.dataInicio||'').localeCompare(a.dataInicio||''));
 
   if (contratos.length === 0) {
     el.innerHTML = `<div class="portal-empty">📄<p>Nenhum contrato encontrado</p></div>`;
