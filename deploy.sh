@@ -3,7 +3,7 @@
 set -e
 
 echo "🔄 Atualizando sistema..."
-git pull origin main
+git pull origin master
 npm install --production
 pm2 restart imoveis-app
 echo "✅ Sistema atualizado com sucesso!"
