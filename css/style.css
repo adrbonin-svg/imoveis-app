@@ -1948,6 +1948,193 @@ tr:hover td { background: var(--gray-50); }
 .modo-portal .main    { margin-left: 0; padding: 0; background: var(--gray-100); }
 .modo-portal .topbar  { margin-left: 0; }
 
+/* ══ HAMBURGER E OVERLAY MOBILE ═══════════════════════ */
+.sidebar-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 99;
+  cursor: pointer;
+}
+.sidebar-overlay.open { display: block; }
+
+.hamburger-btn {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+.hamburger-btn span {
+  display: block;
+  width: 22px; height: 2px;
+  background: var(--gray-600);
+  border-radius: 2px;
+  transition: all .25s;
+}
+
+/* ══ MOBILE ≤ 768px ════════════════════════════════════ */
+@media (max-width: 768px) {
+  .hamburger-btn { display: flex; }
+
+  /* Sidebar: oculta por padrão, desliza da esquerda */
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform .28s ease;
+    z-index: 101;
+    box-shadow: none;
+  }
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0,0,0,.25);
+  }
+
+  /* Main ocupa tela toda */
+  .main { margin-left: 0; }
+
+  /* Topbar */
+  .topbar { padding: 10px 14px; gap: 8px; }
+  .topbar h2 { font-size: 16px; }
+  .topbar > div:first-child { display: flex; align-items: center; flex: 1; min-width: 0; }
+  .topbar-sub { display: none; }
+
+  /* Nome e perfil do usuário: ocultos no topbar em telas pequenas */
+  .topbar-user-name,
+  .topbar-user-role { display: none; }
+
+  /* Conteúdo: menos padding */
+  .content { padding: 14px 12px; }
+
+  /* Cards grid: 2 colunas */
+  .cards-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+  .card { padding: 14px 12px; }
+  .card-value { font-size: 20px; }
+  .card-icon { width: 38px; height: 38px; font-size: 18px; margin-bottom: 8px; }
+  .card-label { font-size: 11px; }
+
+  /* Tabelas: scroll horizontal */
+  .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 10px; }
+  .table-wrapper table { min-width: 520px; }
+
+  /* Cabeçalho da tabela: empilhado */
+  .table-header { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 14px; }
+  .table-header h3 { font-size: 14px; }
+  .search-box { width: 100%; font-size: 14px; padding: 9px 12px; }
+
+  /* Botões de ação na tabela */
+  .actions { flex-wrap: wrap; gap: 4px; }
+  td .btn-sm { font-size: 11px; padding: 5px 8px; }
+
+  /* Modais: panel inferior (bottom sheet) */
+  .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 90vh !important;
+    border-radius: 20px 20px 0 0;
+    animation: slideUp .25s ease;
+  }
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+  }
+  .modal-head { padding: 16px 18px; }
+  .modal-body { padding: 16px 18px; }
+  .modal-footer { padding: 12px 18px; }
+  .modal-ficha  { width: 100% !important; }
+  .modal-wide   { width: 100% !important; }
+  .modal-contrato-preview { width: 100% !important; }
+  .modal.modal-xl { width: 100% !important; max-width: 100% !important; }
+
+  /* Grids de form: 1 coluna */
+  .form-grid { grid-template-columns: 1fr !important; }
+  .form-col-2 { grid-column: span 1 !important; }
+
+  /* Charts */
+  .charts-grid { grid-template-columns: 1fr; }
+
+  /* Indices */
+  .indices-grid { grid-template-columns: 1fr; }
+  .indice-loading, .indice-erro { grid-column: span 1; }
+
+  /* Relatórios layout */
+  .rel-layout { grid-template-columns: 1fr; }
+
+  /* Modelo contrato */
+  .modelo-layout { grid-template-columns: 1fr; }
+  .modelo-textarea { min-height: 260px; }
+
+  /* Config listas */
+  .cfg-listas-grid { grid-template-columns: 1fr; }
+
+  /* Manutenção docs grid */
+  .man-docs-grid { grid-template-columns: 1fr; }
+
+  /* Ficha grid */
+  .ficha-grid { grid-template-columns: 1fr; }
+  .ficha-full { grid-column: span 1; }
+  .ficha-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+
+  /* Período bar */
+  .periodo-bar { padding: 10px 12px; gap: 6px; }
+  .periodo-label { margin-left: 0; }
+
+  /* Filter bar: scroll horizontal sem quebra */
+  .filter-bar { overflow-x: auto; flex-wrap: nowrap; padding: 8px 12px; -webkit-overflow-scrolling: touch; }
+  .filter-bar::-webkit-scrollbar { display: none; }
+
+  /* Tabs: scroll horizontal */
+  .tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .tabs::-webkit-scrollbar { display: none; }
+
+  /* Toast: centralizado na base */
+  .toast { left: 12px; right: 12px; bottom: 14px; text-align: center; }
+
+  /* Botões maiores para toque */
+  .btn { min-height: 40px; }
+  .btn-sm { min-height: 34px; }
+
+  /* Nav items do sidebar maiores */
+  .nav-item { padding: 14px 20px; font-size: 15px; }
+  .nav-item .nav-icon { font-size: 20px; }
+
+  /* Portal */
+  .portal-container { padding: 10px 10px; }
+  .portal-hero { padding: 14px 16px; gap: 12px; }
+  .portal-tabs-bar { gap: 4px; padding: 4px; }
+  .portal-tab { font-size: 12px; padding: 8px 6px; }
+  .portal-card { padding: 12px 14px; }
+
+  /* Barra de período: seletores menores */
+  .periodo-selectors select { font-size: 12px; padding: 5px 8px; }
+
+  /* Ocultar coluna menos importante em telas pequenas */
+  .hide-mobile { display: none !important; }
+
+  /* Reajuste: linhas */
+  .reaj-linha { gap: 8px; font-size: 12px; }
+
+  /* Ficha imovel header */
+  .ficha-imo-header { flex-direction: column; gap: 12px; padding: 16px; }
+  .ficha-imo-header h2 { font-size: 16px; }
+}
+
+/* ══ MUITO PEQUENO ≤ 480px ═════════════════════════════ */
+@media (max-width: 480px) {
+  .cards-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .card-value { font-size: 18px; }
+  .topbar h2 { font-size: 14px; }
+  .content { padding: 10px 10px; }
+  .login-card { padding: 32px 22px 28px; }
+  .login-logo img { width: 110px; }
+}
+
 /* ══ PORTAL LAYOUT ══════════════════════════════════════ */
 .portal-container { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
 .portal-hero {

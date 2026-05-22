@@ -610,6 +610,18 @@ function toggleUserDropdown() {
   document.getElementById('topbar-user-dropdown').classList.toggle('open');
 }
 
+// ── SIDEBAR MOBILE ─────────────────────────────────────
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar-el');
+  const ov = document.getElementById('sidebar-overlay');
+  sb.classList.toggle('open');
+  ov.classList.toggle('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar-el')?.classList.remove('open');
+  document.getElementById('sidebar-overlay')?.classList.remove('open');
+}
+
 document.addEventListener('click', e => {
   if (!document.getElementById('topbar-user-btn')?.contains(e.target))
     document.getElementById('topbar-user-dropdown')?.classList.remove('open');
@@ -6821,7 +6833,7 @@ async function _initApp() {
   if (loadingEl) loadingEl.style.display = 'none';
 
   document.querySelectorAll('.nav-item').forEach(el => {
-    el.addEventListener('click', () => navigate(el.dataset.page));
+    el.addEventListener('click', () => { navigate(el.dataset.page); closeSidebar(); });
   });
   _pollWebhookEvents();
   setInterval(_pollWebhookEvents, 30000);
