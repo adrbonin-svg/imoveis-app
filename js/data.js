@@ -465,10 +465,26 @@ function _applyParsedData(parsed, persistLocalStorage) {
     if (Array.isArray(DB[k])) DB[k].forEach(x => { if (!x.empresaId) x.empresaId = 1; });
   });
 
-  // Adicionar usuário também deve ter empresaId (exceto supermaster)
+  // Adicionar empresaId e converter permissões de formato legado (array → objeto)
   if (Array.isArray(DB.usuarios)) {
     DB.usuarios.forEach(u => {
       if (u.perfil !== 'supermaster' && !u.empresaId) u.empresaId = 1;
+      // Converter permissoes de array (legado) para objeto com ações
+      if (Array.isArray(u.permissoes)) {
+        const obj = {};
+        const soVer    = ['relatorios', 'usuarios'];
+        const verEditar = ['config'];
+        u.permissoes.forEach(pg => {
+          if (soVer.includes(pg))      obj[pg] = { ver: true };
+          else if (verEditar.includes(pg)) obj[pg] = { ver: true, editar: true };
+          else obj[pg] = { ver: true, criar: true, editar: true, excluir: true };
+        });
+        // Admin da empresa principal (id=1) recebe acesso à auditoria
+        if (u.perfil === 'admin' && (u.empresaId === 1 || !u.empresaId)) {
+          obj.auditoria = { ver: true };
+        }
+        u.permissoes = obj;
+      }
     });
   }
 

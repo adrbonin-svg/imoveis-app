@@ -481,7 +481,7 @@ const PAGINAS_PERM = [
 function _podeAcao(page, acao) {
   if (!_currentUser) return false;
   if (_currentUser.perfil === 'supermaster') return true;
-  if (_currentUser.perfil === 'admin') return true;
+  if (_currentUser.perfil === 'inquilino') return false;
   const p = _currentUser.permissoes;
   if (!p) return false;
   // Suporte ao formato antigo (array de strings)
@@ -6175,10 +6175,11 @@ function _auditLog(acao, entidade, entidadeId, entidadeNome, dadosAntes, dadosDe
   DB.auditoria.unshift({
     id:           `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
     timestamp:    new Date().toISOString(),
+    empresaId:    _currentEmpresaId(),
     usuarioId:    _currentUser?.id   || null,
     usuarioNome:  _currentUser?.nome || 'Sistema',
-    acao,         // 'criar' | 'editar' | 'excluir'
-    entidade,     // 'inquilino' | 'imovel' | 'contrato' | 'financeiro' | 'manutencao' | ...
+    acao,
+    entidade,
     entidadeId,
     entidadeNome: entidadeNome || String(entidadeId),
     dadosAntes:   _sanitizeAudit(dadosAntes),
@@ -6265,7 +6266,9 @@ let _auditFiltros = { entidade: '', acao: '', usuario: '', busca: '' };
 
 function renderAuditoria() {
   if (!Array.isArray(DB.auditoria)) DB.auditoria = [];
-  const lista = DB.auditoria;
+  const lista = _isSuperMaster()
+    ? DB.auditoria
+    : DB.auditoria.filter(l => l.empresaId === _currentEmpresaId());
 
   // Preenche filtro de usuários
   const usuarios = [...new Set(lista.map(l => l.usuarioNome))].sort();
