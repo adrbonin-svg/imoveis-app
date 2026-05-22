@@ -4290,6 +4290,9 @@ function openUsuario(id = null) {
 
   document.getElementById('usr-perm-grid').innerHTML = _buildPermTable(permExistente);
   usrTogglePerfil(form.elements['perfil']);
+  if (id && u.perfil === 'inquilino' && u.inquilinoId) {
+    document.getElementById('usr-campo-inquilinoId').value = u.inquilinoId;
+  }
   modal.classList.add('open');
 }
 
@@ -4312,8 +4315,23 @@ function usrSyncPerm(cb) {
 }
 
 function usrTogglePerfil(sel) {
-  const isAdmin = sel.value === 'admin';
-  document.getElementById('usr-perm-section').style.display = isAdmin ? 'none' : '';
+  const perfil = sel.value;
+  const isAdmin     = perfil === 'admin';
+  const isInquilino = perfil === 'inquilino';
+  document.getElementById('usr-perm-section').style.display      = (isAdmin || isInquilino) ? 'none' : '';
+  document.getElementById('usr-inquilino-section').style.display = isInquilino ? '' : 'none';
+
+  if (isInquilino) {
+    // Preenche select de inquilinos disponíveis (sem usuário já vinculado)
+    const sel = document.getElementById('usr-campo-inquilinoId');
+    const editId = parseInt(document.getElementById('form-usuario').dataset.id) || null;
+    const jaVinculados = DB.usuarios
+      .filter(u => u.perfil === 'inquilino' && u.inquilinoId && u.id !== editId)
+      .map(u => u.inquilinoId);
+    const lista = _myData(DB.inquilinos).filter(i => i.ativo !== false && !jaVinculados.includes(i.id));
+    sel.innerHTML = '<option value="">— selecione o inquilino —</option>' +
+      lista.map(i => `<option value="${i.id}">${i.nome}</option>`).join('');
+  }
 }
 
 function usrSelectAll(check) {
@@ -4330,6 +4348,7 @@ function saveUsuario() {
   const senha2  = form.elements['senhaConfirm'].value;
   const perfil  = form.elements['perfil'].value;
   const ativo   = form.elements['ativo'].value === '1';
+  const inquilinoId = perfil === 'inquilino' ? parseInt(document.getElementById('usr-campo-inquilinoId').value) || null : null;
 
   if (!nome)    { _fieldError('usr-campo-nome',    'Nome é obrigatório'); return; }
   if (!email)   { _fieldError('usr-campo-email',   'E-mail é obrigatório'); return; }
@@ -4342,6 +4361,8 @@ function saveUsuario() {
   if (senha && senha !== senha2) { _fieldError('usr-campo-senha2', 'Senhas não conferem'); return; }
   if (senha && senha.length < 3) { _fieldError('usr-campo-senha', 'Senha deve ter ao menos 3 caracteres'); return; }
 
+  if (perfil === 'inquilino' && !inquilinoId) { _fieldError('usr-campo-inquilinoId', 'Selecione o inquilino a vincular'); return; }
+
   // Coleta permissões no novo formato objeto
   let permissoes;
   if (perfil === 'admin') {
@@ -4351,6 +4372,8 @@ function saveUsuario() {
       pg.acoes.forEach(a => { permissoes[pg.id][a] = true; });
     });
     permissoes['usuarios'] = { ver: true };
+  } else if (perfil === 'inquilino') {
+    permissoes = {};
   } else {
     permissoes = {};
     PAGINAS_PERM.forEach(pg => {
@@ -4367,12 +4390,12 @@ function saveUsuario() {
 
   if (id) {
     const idx = DB.usuarios.findIndex(u => u.id === id);
-    const upd = { nome, email, usuario, perfil, permissoes, ativo };
+    const upd = { nome, email, usuario, perfil, permissoes, ativo, inquilinoId };
     if (senha) upd.senha = senha;
     DB.usuarios[idx] = { ...DB.usuarios[idx], ...upd };
     if (_currentUser?.id === id) { _currentUser = DB.usuarios[idx]; _mostrarApp(); }
   } else {
-    DB.usuarios.push({ id: nextId(DB.usuarios), empresaId: _currentEmpresaId(), nome, email, usuario, senha, perfil, permissoes, ativo });
+    DB.usuarios.push({ id: nextId(DB.usuarios), empresaId: _currentEmpresaId(), nome, email, usuario, senha, perfil, permissoes, ativo, inquilinoId });
   }
   saveData();
   closeModal('modal-usuario');
