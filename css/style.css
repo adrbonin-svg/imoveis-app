@@ -1698,12 +1698,19 @@ tr:hover td { background: var(--gray-50); }
 }
 .login-overlay.hidden { display: none; }
 .login-card {
-  background: #fff; border-radius: 18px; padding: 44px 40px 36px;
-  width: 390px; max-width: calc(100vw - 32px);
+  background: #fff; border-radius: 18px; padding: 40px 44px 36px;
+  width: 460px; max-width: calc(100vw - 32px);
   box-shadow: 0 24px 64px rgba(0,0,0,.35);
   text-align: center;
 }
-.login-logo { font-size: 52px; margin-bottom: 10px; }
+.login-logo {
+  font-size: 52px; margin-bottom: 16px;
+  display: flex; align-items: center; justify-content: center;
+}
+.login-logo img {
+  width: 85%; max-width: 340px;
+  display: block; margin: 0 auto;
+}
 .login-card h2 { font-size: 20px; font-weight: 700; color: var(--gray-800); margin-bottom: 4px; }
 .login-card > p { color: var(--gray-400); font-size: 13px; margin-bottom: 28px; }
 .login-card .form-group { text-align: left; margin-bottom: 14px; }
@@ -2131,8 +2138,8 @@ tr:hover td { background: var(--gray-50); }
   .card-value { font-size: 18px; }
   .topbar h2 { font-size: 14px; }
   .content { padding: 10px 10px; }
-  .login-card { padding: 32px 22px 28px; }
-  .login-logo img { width: 110px; }
+  .login-card { padding: 28px 20px 24px; }
+  .login-logo img { width: 75%; max-width: 240px; }
 }
 
 /* ══ PORTAL LAYOUT ══════════════════════════════════════ */
