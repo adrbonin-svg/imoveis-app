@@ -4188,7 +4188,11 @@ function openHistoricoPrev(id) {
 const ACAO_LABELS = { criar: 'Criar', editar: 'Editar', excluir: 'Excluir' };
 
 function renderUsuarios() {
-  const list = _isSuperMaster() ? DB.usuarios : DB.usuarios.filter(u => u.empresaId === _currentEmpresaId() && u.perfil !== 'supermaster');
+  const isAdmin = _currentUser?.perfil === 'admin' || _isSuperMaster();
+  const base = _isSuperMaster()
+    ? DB.usuarios
+    : DB.usuarios.filter(u => u.empresaId === _currentEmpresaId() && u.perfil !== 'supermaster');
+  const list = isAdmin ? base : base.filter(u => u.perfil === 'inquilino');
   document.getElementById('usr-total').textContent    = list.length;
   document.getElementById('usr-admins').textContent   = list.filter(u => u.perfil === 'admin').length;
   document.getElementById('usr-ativos').textContent   = list.filter(u => u.ativo).length;
@@ -4290,6 +4294,13 @@ function openUsuario(id = null) {
     permExistente = Array.isArray(u.permissoes) ? {} : (u.permissoes || {});
   }
 
+  // Não-admin só pode criar/editar usuários com perfil inquilino
+  const logadoAdmin = _currentUser?.perfil === 'admin' || _isSuperMaster();
+  form.elements['perfil'].querySelectorAll('option').forEach(opt => {
+    opt.style.display = (!logadoAdmin && opt.value !== 'inquilino') ? 'none' : '';
+  });
+  if (!logadoAdmin) form.elements['perfil'].value = u?.perfil || 'inquilino';
+
   document.getElementById('usr-perm-grid').innerHTML = _buildPermTable(permExistente);
   usrTogglePerfil(form.elements['perfil']);
   if (u?.perfil === 'inquilino' && u.inquilinoId) {
@@ -4325,8 +4336,8 @@ function usrTogglePerfil(sel) {
   document.getElementById('usr-inquilino-section').style.display = isInquilino ? '' : 'none';
 
   if (isUsuario) {
-    // Para perfil Usuário: exibe módulos principais (sem Usuários, Empresas, Cobranças)
-    const ADMIN_ONLY = ['usuarios', 'empresas', 'cobrancas-empresas'];
+    // Para perfil Usuário: exibe módulos principais (sem Empresas e Cobranças)
+    const ADMIN_ONLY = ['empresas', 'cobrancas-empresas'];
     const form   = document.getElementById('form-usuario');
     const editId = form.dataset.id ? parseInt(form.dataset.id) : null;
     let perm = {};
