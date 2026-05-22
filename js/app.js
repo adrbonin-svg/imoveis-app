@@ -4583,27 +4583,46 @@ function confirmarRenovacao() {
 
 const _asaasServer = () => window.location.protocol !== 'file:';
 
+// ── Config por empresa (Asaas + E-mail isolados por tenant) ──
+function _asaasEmpConfig() {
+  const emp = _empresaAtual();
+  return emp?.asaasConfig || {};
+}
+function _emailEmpConfig() {
+  const emp = _empresaAtual();
+  return emp?.emailConfig || {};
+}
+function _setAsaasEmpConfig(updates) {
+  const emp = _empresaAtual();
+  if (!emp) return;
+  emp.asaasConfig = { ...(emp.asaasConfig || {}), ...updates };
+  saveData();
+}
+function _setEmailEmpConfig(updates) {
+  const emp = _empresaAtual();
+  if (!emp) return;
+  emp.emailConfig = { ...(emp.emailConfig || {}), ...updates };
+  saveData();
+}
+
 function _asaasAtivo() {
-  return DB.config.asaas?.ativo === true;
+  return _asaasEmpConfig().ativo === true;
 }
 
 async function _autoDetectAsaas() {
-  if (!_asaasServer()) return;
-  if (DB.config.asaas?.ativo) return;
-  try {
-    const data = await fetch('/api/asaas/config').then(r => r.json());
-    if (data.configured) {
-      DB.config.asaas = Object.assign({ autoGerar: false, nomeBeneficiario: '' }, DB.config.asaas, { ativo: true });
-      saveData();
-      if (document.getElementById('page-financeiro')?.classList.contains('active')) renderFinanceiro();
-    }
-  } catch {}
+  // Auto-detecção baseada na config da empresa (não mais global)
+  const ac = _asaasEmpConfig();
+  if (ac.ativo && ac.apiKey) return;
 }
 
 async function _asaasCall(method, path, body) {
+  const ac = _asaasEmpConfig();
   const res = await fetch(`/api/asaas${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(ac.apiKey ? { 'x-asaas-key': ac.apiKey, 'x-asaas-env': ac.env || 'sandbox' } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   return res.json();
@@ -4638,65 +4657,48 @@ async function testAsaasConnection() {
 
 // Salva config Asaas no DB
 async function saveAsaasConfig() {
-  const apiKey          = document.getElementById('cfg-asaas-key')?.value.trim() || '';
-  const env             = document.querySelector('input[name="cfg-asaas-env"]:checked')?.value || 'sandbox';
-  const webhookToken    = document.getElementById('cfg-asaas-webhook-token')?.value.trim() || '';
-  const ativo           = document.getElementById('cfg-asaas-ativo')?.checked || false;
-  const autoGerar       = document.getElementById('cfg-asaas-autogerar')?.checked || false;
+  const apiKey           = document.getElementById('cfg-asaas-key')?.value.trim() || '';
+  const env              = document.querySelector('input[name="cfg-asaas-env"]:checked')?.value || 'sandbox';
+  const webhookToken     = document.getElementById('cfg-asaas-webhook-token')?.value.trim() || '';
+  const ativo            = document.getElementById('cfg-asaas-ativo')?.checked || false;
+  const autoGerar        = document.getElementById('cfg-asaas-autogerar')?.checked || false;
   const nomeBeneficiario = document.getElementById('cfg-asaas-beneficiario')?.value.trim() || '';
 
-  // Salva preferências no localStorage
-  DB.config.asaas = { ativo, autoGerar, nomeBeneficiario };
-  saveData();
+  const ac = _asaasEmpConfig();
+  _setAsaasEmpConfig({
+    ativo, autoGerar, nomeBeneficiario, env, webhookToken,
+    ...(apiKey ? {
+      apiKey,
+      keyMasked: apiKey.length > 12 ? apiKey.slice(0, 12) + '••••' + apiKey.slice(-4) : '••••••••',
+    } : {}),
+  });
 
-  // Envia chave ao servidor para salvar no .env (só se preenchida)
-  if (apiKey && _asaasServer()) {
-    const btn = event?.target;
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Salvando...'; }
-    try {
-      const res = await fetch('/api/asaas/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, env, webhookToken }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        toast('Configurações salvas e aplicadas!', 'success');
-        document.getElementById('cfg-asaas-key').value = '';
-        await _carregarAsaasAtual();
-        if (ativo) testAsaasConnection();
-      } else {
-        toast(`Erro: ${data.error}`, 'error');
-      }
-    } catch {
-      toast('Erro ao comunicar com o servidor', 'error');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar e Aplicar Configurações Asaas'; }
-    }
-  } else if (!apiKey) {
-    toast('Preferências salvas (chave não alterada)', 'success');
-    if (ativo) testAsaasConnection();
-  } else {
-    toast('Configurações salvas localmente', 'success');
-  }
+  document.getElementById('cfg-asaas-key').value = '';
+  _carregarAsaasAtual();
+  toast('Configurações Asaas salvas!', 'success');
+  const keyFinal = apiKey || ac.apiKey || '';
+  if (ativo && keyFinal) testAsaasConnection();
 }
 
 // Carrega chave mascarada atual do servidor
-async function _carregarAsaasAtual() {
-  if (!_asaasServer()) return;
-  try {
-    const res = await fetch('/api/asaas/config');
-    const data = await res.json();
-    const el = document.getElementById('cfg-asaas-key-atual');
-    if (el) {
-      el.textContent = data.configured
-        ? `Chave atual: ${data.keyMasked} | Ambiente: ${data.env}`
-        : 'Nenhuma chave configurada';
-    }
-    // Marca ambiente correto
-    const radio = document.querySelector(`input[name="cfg-asaas-env"][value="${data.env}"]`);
-    if (radio) radio.checked = true;
-  } catch { /* servidor offline */ }
+function _carregarAsaasAtual() {
+  const ac = _asaasEmpConfig();
+  const el = document.getElementById('cfg-asaas-key-atual');
+  if (el) {
+    el.textContent = ac.apiKey
+      ? `Chave atual: ${ac.keyMasked || '••••••••'} | Ambiente: ${ac.env || 'sandbox'}`
+      : 'Nenhuma chave configurada para esta empresa';
+  }
+  const radio = document.querySelector(`input[name="cfg-asaas-env"][value="${ac.env || 'sandbox'}"]`);
+  if (radio) radio.checked = true;
+  const elAtivo   = document.getElementById('cfg-asaas-ativo');
+  const elAuto    = document.getElementById('cfg-asaas-autogerar');
+  const elBenef   = document.getElementById('cfg-asaas-beneficiario');
+  const elWebhook = document.getElementById('cfg-asaas-webhook-token');
+  if (elAtivo)   elAtivo.checked   = ac.ativo      || false;
+  if (elAuto)    elAuto.checked    = ac.autoGerar   || false;
+  if (elBenef)   elBenef.value     = ac.nomeBeneficiario || '';
+  if (elWebhook && !elWebhook.value) elWebhook.placeholder = ac.webhookToken ? '••••••••' : '';
 }
 
 function toggleAsaasKey() {
@@ -4774,7 +4776,7 @@ async function gerarBoleto(finId) {
       billingType:   'BOLETO',
       value:         parseFloat(f.totalGeral) || parseFloat(f.valorContrato) || 0,
       dueDate:       f.dataPagamento,
-      description:   `${DB.config.asaas?.nomeBeneficiario || DB.config.locador?.nome || 'Locador'} — Aluguel ${f.contrato} — ${fmtDate(f.dataPagamento)}`,
+      description:   `${_asaasEmpConfig().nomeBeneficiario || DB.config.locador?.nome || 'Locador'} — Aluguel ${f.contrato} — ${fmtDate(f.dataPagamento)}`,
       observations:  observacoesBoleto,
       externalReference: String(f.id),
     });
@@ -4832,8 +4834,14 @@ function abrirModalBoleto(f) {
     `Vencimento: ${fmtDate(f.dataPagamento)} | Total: ${fmt(f.totalGeral || f.valorContrato)}`;
   document.getElementById('boleto-linha').value   = f.boletoLinha || 'Linha não disponível';
   const link = document.getElementById('boleto-pdf-link');
-  if (f.asaasPaymentId) {
-    link.href = `/api/asaas/payment/${f.asaasPaymentId}/pdf`;
+  if (f.boletoPdfUrl) {
+    link.href = f.boletoPdfUrl;
+    link.target = '_blank';
+    link.style.opacity = '1';
+    link.style.pointerEvents = '';
+  } else if (f.asaasPaymentId) {
+    link.href = `/api/asaas/payment/${f.asaasPaymentId}/pdf?eid=${f.empresaId || _currentEmpresaId()}`;
+    link.target = '_blank';
     link.style.opacity = '1';
     link.style.pointerEvents = '';
   } else {
@@ -4878,7 +4886,7 @@ function enviarBoletoWhatsapp() {
   const fone = (inq?.celular || inq?.telefone || '').replace(/\D/g, '');
   if (!fone) { toast('Celular do inquilino não cadastrado', 'error'); return; }
 
-  const benef = DB.config.asaas?.nomeBeneficiario || DB.config.locador?.nome || '';
+  const benef = _asaasEmpConfig().nomeBeneficiario || DB.config.locador?.nome || '';
   const msg = encodeURIComponent(
     `Olá ${f.inquilino || 'inquilino'}, segue o boleto referente ao aluguel de ${fmtDate(f.dataPagamento)}.\n\n` +
     (benef ? `Beneficiário: ${benef}\n` : '') +
@@ -4896,7 +4904,7 @@ function enviarBoletoWhatsappDireto(finId) {
   const inq = contrato ? DB.inquilinos.find(i => i.nome === contrato.inquilino) : null;
   const fone = (inq?.celular || inq?.telefone || '').replace(/\D/g, '');
   if (!fone) { toast('Celular do inquilino não cadastrado', 'error'); return; }
-  const benef = DB.config.asaas?.nomeBeneficiario || DB.config.locador?.nome || '';
+  const benef = _asaasEmpConfig().nomeBeneficiario || DB.config.locador?.nome || '';
   let texto = `Olá ${f.inquilino || 'inquilino'}, segue informações do pagamento referente ao aluguel de ${fmtDate(f.dataPagamento)}.\n\n`;
   if (benef) texto += `Beneficiário: ${benef}\n`;
   texto += `Valor: ${fmt(f.totalGeral || f.valorContrato)}\n`;
@@ -6450,11 +6458,17 @@ async function _enviarEmailInquilino(template, inqId, dadosExtras = {}) {
     toast('Inquilino não possui e-mail cadastrado', 'error');
     return false;
   }
+  const ec = _emailEmpConfig();
   try {
     const res = await fetch('/api/email/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ template, to: inq.email, dados: { nome: inq.nome, ...dadosExtras } }),
+      body: JSON.stringify({
+        template,
+        to: inq.email,
+        dados: { nome: inq.nome, ...dadosExtras },
+        smtpConfig: (ec.user && ec.pass) ? ec : null,
+      }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
@@ -6499,61 +6513,52 @@ async function _fichaNotificarAcesso() {
 }
 
 async function carregarConfigEmail() {
-  try {
-    const res  = await fetch('/api/email/config');
-    const data = await res.json();
-    const set  = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
-    set('email-host',   data.host);
-    set('email-port',   data.port);
-    set('email-user',   data.user);
-    set('email-from',   data.from);
-    set('email-appUrl', data.appUrl);
-    if (data.passMasked) {
-      const el = document.getElementById('email-pass');
-      if (el && !el.value) el.placeholder = data.passMasked;
-    }
-    const status = document.getElementById('email-status');
-    if (status) status.textContent = data.configured ? '✅ E-mail configurado' : '⚠️ Não configurado';
-  } catch {}
+  const ec  = _emailEmpConfig();
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+  set('email-host',   ec.host   || 'smtp.gmail.com');
+  set('email-port',   ec.port   || 465);
+  set('email-user',   ec.user   || '');
+  set('email-from',   ec.from   || '');
+  set('email-appUrl', ec.appUrl || '');
+  if (ec.pass) {
+    const el = document.getElementById('email-pass');
+    if (el && !el.value) el.placeholder = '••••••••';
+  }
+  const status = document.getElementById('email-status');
+  if (status) status.textContent = (ec.user && ec.pass) ? '✅ E-mail configurado' : '⚠️ Não configurado';
 }
 
 async function salvarConfigEmail() {
-  const get = id => document.getElementById(id)?.value.trim() || '';
+  const get  = id => document.getElementById(id)?.value.trim() || '';
   const pass = get('email-pass');
   if (!get('email-user')) { toast('Informe o e-mail do remetente', 'error'); return; }
   if (!pass) { toast('Informe a senha do app', 'error'); return; }
-  try {
-    const res  = await fetch('/api/email/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        host:   get('email-host') || 'smtp.gmail.com',
-        port:   parseInt(get('email-port')) || 465,
-        secure: true,
-        user:   get('email-user'),
-        pass,
-        from:   get('email-from'),
-        appUrl: get('email-appUrl'),
-      }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      toast('Configuração de e-mail salva!', 'success');
-      document.getElementById('email-pass').value = '';
-      carregarConfigEmail();
-    } else {
-      toast(data.error || 'Erro ao salvar', 'error');
-    }
-  } catch (err) {
-    toast('Erro de rede', 'error');
-  }
+
+  _setEmailEmpConfig({
+    host:   get('email-host')   || 'smtp.gmail.com',
+    port:   parseInt(get('email-port')) || 465,
+    secure: true,
+    user:   get('email-user'),
+    pass,
+    from:   get('email-from')   || get('email-user'),
+    appUrl: get('email-appUrl') || '',
+  });
+
+  document.getElementById('email-pass').value = '';
+  toast('Configuração de e-mail salva!', 'success');
+  carregarConfigEmail();
 }
 
 async function testarEmail() {
   const status = document.getElementById('email-status');
   if (status) status.textContent = '⏳ Enviando...';
   try {
-    const res  = await fetch('/api/email/test', { method: 'POST' });
+    const ec  = _emailEmpConfig();
+    const res = await fetch('/api/email/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ smtpConfig: (ec.user && ec.pass) ? ec : null }),
+    });
     const data = await res.json();
     if (data.ok) {
       toast('E-mail de teste enviado! Verifique sua caixa de entrada.', 'success');

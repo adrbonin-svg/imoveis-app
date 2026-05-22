@@ -223,18 +223,49 @@ function saveEvents(events) {
   fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2));
 }
 
-// ── Helper Asaas ────────────────────────────────────────
-async function asaasRequest(method, endpoint, body) {
-  const res = await fetch(`${asaasBase()}${endpoint}`, {
+// ── Helper Asaas (suporta chave/env por empresa via headers) ──
+function reqAsaasKey(req) { return req.headers['x-asaas-key'] || cfg.key; }
+function reqAsaasEnv(req) { return req.headers['x-asaas-env'] || cfg.env; }
+
+async function asaasRequest(method, endpoint, body, overKey, overEnv) {
+  const key  = overKey  || cfg.key;
+  const base = (overEnv || cfg.env) === 'production'
+    ? 'https://api.asaas.com/v3'
+    : 'https://api-sandbox.asaas.com/v3';
+  const res = await fetch(`${base}${endpoint}`, {
     method,
     headers: {
-      'access_token': cfg.key,
+      'access_token': key,
       'Content-Type': 'application/json',
       'User-Agent': 'imoveis-app/1.0',
     },
     body: body ? JSON.stringify(body) : undefined,
   });
   return res.json();
+}
+
+// Lê config Asaas de uma empresa específica (para PDF redirect)
+async function getEmpresaAsaasConfig(empresaId) {
+  try {
+    const col = await getCol();
+    const doc = col ? await col.findOne({ _id: 'main' }) : null;
+    const data = doc || JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    const emp = data?.empresas?.find(e => e.id === empresaId);
+    return emp?.asaasConfig || null;
+  } catch { return null; }
+}
+
+// Helper transporter de e-mail por empresa (aceita smtpConfig inline)
+function makeTransporter(smtpConfig) {
+  if (smtpConfig?.user && smtpConfig?.pass) {
+    return nodemailer.createTransport({
+      host:   smtpConfig.host   || 'smtp.gmail.com',
+      port:   smtpConfig.port   || 465,
+      secure: smtpConfig.secure !== false,
+      auth:   { user: smtpConfig.user, pass: smtpConfig.pass },
+    });
+  }
+  return getTransporter();
 }
 
 // ── Salvar configuração do Asaas (chave + ambiente) ─────
@@ -281,10 +312,12 @@ app.get('/api/asaas/config', (req, res) => {
 
 // ── Status da conexão ───────────────────────────────────
 app.get('/api/asaas/status', async (req, res) => {
-  if (!cfg.key) return res.json({ ok: false, error: 'Chave API não configurada' });
+  const key = reqAsaasKey(req);
+  const env = reqAsaasEnv(req);
+  if (!key) return res.json({ ok: false, error: 'Chave API não configurada' });
   try {
-    const data = await asaasRequest('GET', '/myAccount');
-    res.json({ ok: !data.errors, env: cfg.env, account: data });
+    const data = await asaasRequest('GET', '/myAccount', null, key, env);
+    res.json({ ok: !data.errors, env, account: data });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -292,11 +325,13 @@ app.get('/api/asaas/status', async (req, res) => {
 
 // ── Clientes ────────────────────────────────────────────
 app.post('/api/asaas/customer', async (req, res) => {
+  const key = reqAsaasKey(req);
+  const env = reqAsaasEnv(req);
   try {
     const { name, cpfCnpj, email, mobilePhone } = req.body;
 
     if (cpfCnpj) {
-      const search = await asaasRequest('GET', `/customers?cpfCnpj=${encodeURIComponent(cpfCnpj.replace(/\D/g,''))}`);
+      const search = await asaasRequest('GET', `/customers?cpfCnpj=${encodeURIComponent(cpfCnpj.replace(/\D/g,''))}`, null, key, env);
       if (search.data && search.data.length > 0) {
         return res.json({ ok: true, customer: search.data[0] });
       }
@@ -307,7 +342,7 @@ app.post('/api/asaas/customer', async (req, res) => {
     if (email)       payload.email       = email;
     if (mobilePhone) payload.mobilePhone = mobilePhone.replace(/\D/g, '');
 
-    const customer = await asaasRequest('POST', '/customers', payload);
+    const customer = await asaasRequest('POST', '/customers', payload, key, env);
     if (customer.errors) return res.json({ ok: false, errors: customer.errors });
     res.json({ ok: true, customer });
   } catch (err) {
@@ -317,28 +352,32 @@ app.post('/api/asaas/customer', async (req, res) => {
 
 // ── Cobranças (Boleto) ──────────────────────────────────
 app.post('/api/asaas/payment', async (req, res) => {
+  const key = reqAsaasKey(req);
+  const env = reqAsaasEnv(req);
   try {
-    const payment = await asaasRequest('POST', '/payments', req.body);
+    const { _emailMeta, ...paymentBody } = req.body;
+    const payment = await asaasRequest('POST', '/payments', paymentBody, key, env);
     if (payment.errors) return res.json({ ok: false, errors: payment.errors });
 
-    // Envia e-mail de notificação de boleto em background (não bloqueia a resposta)
-    const { emailInquilino, nomeInquilino, contrato } = req.body._emailMeta || {};
-    if (emailInquilino && emailCfg.user) {
-      const valor    = payment.value?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '—';
-      const venc     = payment.dueDate
+    // Envia e-mail de notificação em background usando SMTP da empresa
+    const { emailInquilino, nomeInquilino, contrato, smtpConfig } = _emailMeta || {};
+    const t = makeTransporter(smtpConfig);
+    if (emailInquilino && t) {
+      const valor = payment.value?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '—';
+      const venc  = payment.dueDate
         ? new Date(payment.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')
         : '—';
+      const appUrl = smtpConfig?.appUrl || emailCfg.appUrl;
       const { subject, html } = emailTemplates.boleto({
         nome: nomeInquilino || 'Inquilino',
         contrato: contrato || payment.description || '—',
-        valor,
-        vencimento: venc,
+        valor, vencimento: venc,
         linkBoleto: payment.bankSlipUrl || payment.invoiceUrl || '',
-        appUrl: emailCfg.appUrl,
+        appUrl,
       });
-      enviarEmail({ to: emailInquilino, subject, html })
+      t.sendMail({ from: smtpConfig?.from || emailCfg.from || emailCfg.user, to: emailInquilino, subject, html })
         .then(() => console.log(`[Email] Boleto enviado para ${emailInquilino}`))
-        .catch(e => console.error('[Email] Falha ao enviar boleto:', e.message));
+        .catch(e => console.error('[Email] Falha:', e.message));
     }
 
     res.json({ ok: true, payment });
@@ -349,7 +388,7 @@ app.post('/api/asaas/payment', async (req, res) => {
 
 app.get('/api/asaas/payment/:id', async (req, res) => {
   try {
-    const data = await asaasRequest('GET', `/payments/${req.params.id}`);
+    const data = await asaasRequest('GET', `/payments/${req.params.id}`, null, reqAsaasKey(req), reqAsaasEnv(req));
     res.json({ ok: true, payment: data });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -358,7 +397,7 @@ app.get('/api/asaas/payment/:id', async (req, res) => {
 
 app.delete('/api/asaas/payment/:id', async (req, res) => {
   try {
-    const data = await asaasRequest('DELETE', `/payments/${req.params.id}`);
+    const data = await asaasRequest('DELETE', `/payments/${req.params.id}`, null, reqAsaasKey(req), reqAsaasEnv(req));
     res.json({ ok: true, data });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -367,7 +406,7 @@ app.delete('/api/asaas/payment/:id', async (req, res) => {
 
 app.get('/api/asaas/payment/:id/line', async (req, res) => {
   try {
-    const data = await asaasRequest('GET', `/payments/${req.params.id}/identificationField`);
+    const data = await asaasRequest('GET', `/payments/${req.params.id}/identificationField`, null, reqAsaasKey(req), reqAsaasEnv(req));
     res.json({ ok: true, data });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -376,19 +415,25 @@ app.get('/api/asaas/payment/:id/line', async (req, res) => {
 
 app.get('/api/asaas/payment/:id/bankslip', async (req, res) => {
   try {
-    const data = await asaasRequest('GET', `/payments/${req.params.id}/viewBankSlip`);
+    const data = await asaasRequest('GET', `/payments/${req.params.id}/viewBankSlip`, null, reqAsaasKey(req), reqAsaasEnv(req));
     res.json({ ok: true, data });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// Abre o PDF do boleto diretamente no navegador
+// Abre o PDF do boleto diretamente no navegador (suporta ?eid= para chave por empresa)
 app.get('/api/asaas/payment/:id/pdf', async (req, res) => {
   try {
-    // Busca os dados do pagamento — o objeto já contém bankSlipUrl
-    const payment = await asaasRequest('GET', `/payments/${req.params.id}`);
+    let key = reqAsaasKey(req);
+    let env = reqAsaasEnv(req);
+    const eid = req.query.eid ? parseInt(req.query.eid) : null;
+    if (eid) {
+      const empCfg = await getEmpresaAsaasConfig(eid);
+      if (empCfg?.apiKey) { key = empCfg.apiKey; env = empCfg.env || cfg.env; }
+    }
 
+    const payment = await asaasRequest('GET', `/payments/${req.params.id}`, null, key, env);
     const pdfUrl = payment.bankSlipUrl;
 
     if (!pdfUrl) {
@@ -400,7 +445,6 @@ app.get('/api/asaas/payment/:id/pdf', async (req, res) => {
       `);
     }
 
-    // Redireciona para a URL pública do boleto no Asaas
     res.redirect(pdfUrl);
   } catch (err) {
     res.status(500).send(`Erro ao buscar boleto: ${err.message}`);
@@ -448,9 +492,14 @@ app.post('/api/email/config', (req, res) => {
 });
 
 app.post('/api/email/test', async (req, res) => {
+  const { smtpConfig } = req.body || {};
+  const t    = makeTransporter(smtpConfig);
+  const dest = smtpConfig?.user || emailCfg.user;
+  const from = smtpConfig?.from || emailCfg.from || emailCfg.user;
+  if (!t) return res.status(500).json({ ok: false, error: 'E-mail não configurado' });
   try {
-    await enviarEmail({
-      to: emailCfg.user,
+    await t.sendMail({
+      from, to: dest,
       subject: '✅ Teste de e-mail — Sistema de Imóveis',
       html: '<p>E-mail de teste enviado com sucesso! Sua configuração está funcionando.</p>',
     });
@@ -463,10 +512,14 @@ app.post('/api/email/test', async (req, res) => {
 // ── E-mail: envio ───────────────────────────────────────
 app.post('/api/email/send', async (req, res) => {
   try {
-    const { template, to, dados } = req.body;
+    const { template, to, dados, smtpConfig } = req.body;
     if (!emailTemplates[template]) return res.status(400).json({ ok: false, error: 'Template inválido' });
-    const { subject, html } = emailTemplates[template]({ ...dados, appUrl: emailCfg.appUrl });
-    await enviarEmail({ to, subject, html });
+    const appUrl = smtpConfig?.appUrl || emailCfg.appUrl;
+    const { subject, html } = emailTemplates[template]({ ...dados, appUrl });
+    const t    = makeTransporter(smtpConfig);
+    const from = smtpConfig?.from || emailCfg.from || emailCfg.user;
+    if (!t) return res.status(500).json({ ok: false, error: 'E-mail não configurado — acesse Configurações > E-mail' });
+    await t.sendMail({ from, to, subject, html });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
