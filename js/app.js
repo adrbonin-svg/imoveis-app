@@ -1,5 +1,5 @@
 // ── VERSÃO DO SISTEMA ──────────────────────────────────────
-const APP_VERSION = '2026.05.22-v47';
+const APP_VERSION = '2026.05.22-v51';
 // ────────────────────────────────────────────────────────────
 
 // ── MODELO PADRÃO DE CONTRATO (usado por resetModeloContrato) ──────────────
