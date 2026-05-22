@@ -472,6 +472,7 @@ const PAGINAS_PERM = [
   { id: 'relatorios',   label: 'Relatórios',     icon: '📋', acoes: [] },
   { id: 'config',       label: 'Configurações',  icon: '⚙️',  acoes: ['editar'] },
   { id: 'auditoria',    label: 'Auditoria',      icon: '🔍', acoes: [] },
+  { id: 'usuarios',     label: 'Usuários',       icon: '👤', acoes: ['criar','editar','excluir'] },
   { id: 'empresas',           label: 'Empresas',   icon: '🏢', acoes: ['criar','editar','excluir'] },
   { id: 'cobrancas-empresas', label: 'Cobranças',  icon: '💳', acoes: ['criar','editar','excluir'] },
 ];
@@ -494,7 +495,7 @@ function _temPermissao(page) {
   if (!_currentUser) return false;
   if (_currentUser.perfil === 'supermaster') return ['empresas','cobrancas-empresas'].includes(page);
   if (_currentUser.perfil === 'inquilino') return page === 'portal';
-  if (page === 'usuarios') return _currentUser.perfil === 'admin';
+  if (_currentUser.perfil === 'admin') return !['empresas','cobrancas-empresas'].includes(page);
   if (['empresas','cobrancas-empresas'].includes(page)) return false;
   return _podeAcao(page, 'ver');
 }
@@ -577,7 +578,7 @@ function _mostrarApp() {
   // Mostra/oculta nav
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
     const p = el.dataset.page;
-    el.style.display = (p === 'usuarios' ? u.perfil === 'admin' : _temPermissao(p)) ? '' : 'none';
+    el.style.display = _temPermissao(p) ? '' : 'none';
   });
   // Mostra/oculta botões de criar por página
   [
@@ -672,8 +673,7 @@ document.addEventListener('click', e => {
 const showPage = (p) => navigate(p);
 
 function navigate(page) {
-  if (!_temPermissao(page) && page !== 'usuarios' && page !== 'portal') { toast('Sem permissão para esta seção', 'error'); return; }
-  if (page === 'usuarios' && _currentUser?.perfil !== 'admin') { toast('Acesso restrito a administradores', 'error'); return; }
+  if (!_temPermissao(page) && page !== 'portal') { toast('Sem permissão para esta seção', 'error'); return; }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
@@ -4371,7 +4371,6 @@ function saveUsuario() {
       permissoes[pg.id] = { ver: true };
       pg.acoes.forEach(a => { permissoes[pg.id][a] = true; });
     });
-    permissoes['usuarios'] = { ver: true };
   } else if (perfil === 'inquilino') {
     permissoes = {};
   } else {
