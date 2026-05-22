@@ -525,8 +525,11 @@ function doLogin() {
   const senha   = document.getElementById('login-senha').value;
   const errEl   = document.getElementById('login-error');
   errEl.textContent = '';
+  // ativo === undefined (legado) também é tratado como ativo para não bloquear usuários antigos
   const u = DB.usuarios.find(x =>
-    x.usuario.toLowerCase() === usuario.toLowerCase() && x.senha === senha && x.ativo
+    x.usuario && x.usuario.toLowerCase() === usuario.toLowerCase() &&
+    x.senha === senha &&
+    (x.ativo === true || x.ativo === 1 || x.ativo === undefined)
   );
   if (!u) { errEl.textContent = 'Usuário ou senha inválidos'; return; }
   _currentUser = u;
@@ -6512,16 +6515,35 @@ function _renderInqChecklist(inquilinoId) {
 // ── PORTAL DO INQUILINO ────────────────────────────────
 
 function renderPortal() {
-  const u   = _currentUser;
+  const u = _currentUser;
   if (!u || u.perfil !== 'inquilino') return;
-  const inq = DB.inquilinos.find(x => x.id === u.inquilinoId);
-  if (!inq) return;
+
+  // Busca pelo id (normaliza tipo: string vs número)
+  const inqId = Number(u.inquilinoId) || u.inquilinoId;
+  const inq   = DB.inquilinos.find(x => Number(x.id) === Number(inqId));
+
+  // Se não houver vínculo, exibe mensagem amigável no lugar do portal
+  if (!inq) {
+    document.getElementById('portal-avatar').textContent = '?';
+    document.getElementById('portal-nome').textContent   = u.nome || 'Inquilino';
+    document.getElementById('portal-imovel').textContent = '';
+    ['portal-ck-lista','portal-ct-lista','portal-bl-lista'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = `<div class="portal-empty">⚠️<p>Seu cadastro de inquilino não está vinculado a esta conta.<br>Entre em contato com o administrador.</p></div>`;
+    });
+    return;
+  }
 
   const initials = inqInitials(inq.nome);
   document.getElementById('portal-avatar').textContent = initials;
   document.getElementById('portal-nome').textContent   = inq.nome;
 
-  const contAtivo = DB.contratos.find(c => c.inquilino === inq.nome && c.status === 'ATIVO');
+  // Busca contrato ativo por ID ou nome (mais robusto)
+  const contAtivo = DB.contratos.find(c =>
+    (c.inquilinoId && Number(c.inquilinoId) === Number(inq.id)) ||
+    (c.inquilino   && c.inquilino === inq.nome)
+    && c.status === 'ATIVO'
+  );
   document.getElementById('portal-imovel').textContent = contAtivo
     ? `📍 ${contAtivo.imovel}`
     : 'Nenhum contrato ativo no momento';
@@ -6629,7 +6651,13 @@ async function portalConfirmarChecklist(ckId, inqId) {
 function _portalRenderContratos(inq) {
   const el = document.getElementById('portal-ct-lista');
   if (!el) return;
-  const contratos = _myData(DB.contratos).filter(c => c.inquilino === inq.nome).sort((a,b) => (b.dataInicio||'').localeCompare(a.dataInicio||''));
+  // Usa DB.contratos direto (sem filtro de empresaId) e busca por ID ou nome
+  const contratos = DB.contratos
+    .filter(c =>
+      (c.inquilinoId && Number(c.inquilinoId) === Number(inq.id)) ||
+      (c.inquilino   && c.inquilino.trim().toLowerCase() === inq.nome.trim().toLowerCase())
+    )
+    .sort((a,b) => (b.dataInicio||'').localeCompare(a.dataInicio||''));
 
   if (contratos.length === 0) {
     el.innerHTML = `<div class="portal-empty">📄<p>Nenhum contrato encontrado</p></div>`;
@@ -6668,8 +6696,20 @@ function _portalRenderBoletos(inq) {
   const el = document.getElementById('portal-bl-lista');
   if (!el) return;
   const hoje = today();
+  // Coleta contratos do inquilino para cruzar por código de contrato também
+  const codigosContrato = new Set(
+    DB.contratos
+      .filter(c =>
+        (c.inquilinoId && Number(c.inquilinoId) === Number(inq.id)) ||
+        (c.inquilino && c.inquilino.trim().toLowerCase() === inq.nome.trim().toLowerCase())
+      )
+      .map(c => c.codigo)
+  );
   const financ = DB.financeiro
-    .filter(f => (f.inquilino || '').toLowerCase() === inq.nome.toLowerCase())
+    .filter(f =>
+      (f.inquilino || '').trim().toLowerCase() === inq.nome.trim().toLowerCase() ||
+      (f.contrato && codigosContrato.has(f.contrato))
+    )
     .sort((a,b) => (b.dataPagamento||'').localeCompare(a.dataPagamento||''));
 
   if (financ.length === 0) {
