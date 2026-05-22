@@ -4324,7 +4324,8 @@ function usrTogglePerfil(sel) {
   document.getElementById('usr-inquilino-section').style.display = isInquilino ? '' : 'none';
 
   if (isUsuario) {
-    // Para perfil Usuário: exibe apenas o módulo Inquilinos nas permissões
+    // Para perfil Usuário: exibe módulos principais (sem Usuários, Empresas, Cobranças)
+    const ADMIN_ONLY = ['usuarios', 'empresas', 'cobrancas-empresas'];
     const form   = document.getElementById('form-usuario');
     const editId = form.dataset.id ? parseInt(form.dataset.id) : null;
     let perm = {};
@@ -4332,7 +4333,7 @@ function usrTogglePerfil(sel) {
       const u = DB.usuarios.find(x => x.id === editId);
       if (u && !Array.isArray(u.permissoes)) perm = u.permissoes || {};
     }
-    const paginas = PAGINAS_PERM.filter(p => p.id === 'inquilinos');
+    const paginas = PAGINAS_PERM.filter(p => !ADMIN_ONLY.includes(p.id));
     document.getElementById('usr-perm-grid').innerHTML = _buildPermTable(perm, paginas);
   }
 
