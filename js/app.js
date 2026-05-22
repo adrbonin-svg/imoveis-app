@@ -1,5 +1,5 @@
 // ── VERSÃO DO SISTEMA ──────────────────────────────────────
-const APP_VERSION = '2026.05.22-v51';
+const APP_VERSION = '2026.05.22-v52';
 // ────────────────────────────────────────────────────────────
 
 // ── MODELO PADRÃO DE CONTRATO (usado por resetModeloContrato) ──────────────
@@ -684,9 +684,12 @@ function gerarNotificacoes() {
   });
 
   // 2. Contratos vencendo em 30 dias
+  // Campo correto é dataTermino (salvo pelo formulário de contratos)
   _myData(DB.contratos).forEach(c => {
-    if (c.status === 'encerrado' || !c.termino) return;
-    const term = new Date(c.termino + 'T12:00:00'); term.setHours(0, 0, 0, 0);
+    const _termino = c.dataTermino || c.termino; // compatibilidade com registros antigos
+    const _statusOk = (c.status || '').toUpperCase() === 'ATIVO';
+    if (!_statusOk || !_termino) return;
+    const term = new Date(_termino + 'T12:00:00'); term.setHours(0, 0, 0, 0);
     const diff = Math.round((term - hoje) / 86400000);
     if (diff < 0 || diff > 30) return;
     if (jaExiste('contrato', c.id)) return;
@@ -1156,7 +1159,7 @@ function renderDashboard() {
   let cobItems = [
     ...cobrancasPendentes.map(f => {
       const d = new Date(f.dataPagamento + 'T12:00:00');
-      const ctrato = DB.contratos.find(c => c.codigo === f.contrato);
+      const ctrato = _myData(DB.contratos).find(c => c.codigo === f.contrato);
       return {
         _tipo: 'sem_pgto', _id: f.id, _cid: ctrato?.id,
         contrato: f.contrato,
@@ -1169,12 +1172,12 @@ function renderDashboard() {
     }),
     ...pgtoVencidos.map(f => {
       const d = new Date(f.dataPagamento + 'T12:00:00');
-      const ctrato = DB.contratos.find(c => c.codigo === f.contrato);
+      const ctrato = _myData(DB.contratos).find(c => c.codigo === f.contrato);
       return {
         _tipo: 'vencido', _id: f.id, _cid: null,
         contrato: f.contrato,
         imovel: ctrato?.imovel || f.imovel || '—',
-        inquilino: f.inquilino || '—',
+        inquilino: f.inquilino || ctrato?.inquilino || '—',
         valor: f.totalGeral || f.valorContrato || 0,
         _periodoStr: `${MESES[d.getMonth()]}/${d.getFullYear()}`,
         _dataVenc: f.dataPagamento,
@@ -1803,12 +1806,12 @@ function deleteInquilino(id) {
   _auditLog('excluir', 'inquilino', id, inq?.nome || String(id), inq, null);
   // Encerra contratos ATIVO vinculados a este inquilino
   DB.contratos.forEach(c => {
-    if ((c.inquilinoId === id || (inq && c.inquilino === inq.nome)) && c.status === 'ATIVO') {
+    if ((Number(c.inquilinoId) === Number(id) || (inq && c.inquilino === inq.nome)) && c.status === 'ATIVO') {
       c.status = 'ENCERRADO';
     }
   });
   DB.inquilinos = DB.inquilinos.filter(x => x.id !== id);
-  DB.usuarios   = DB.usuarios.filter(u => !(u.perfil === 'inquilino' && u.inquilinoId === id));
+  DB.usuarios   = DB.usuarios.filter(u => !(u.perfil === 'inquilino' && Number(u.inquilinoId) === Number(id)));
   _syncAllImoveisStatus();
   saveData();
   renderInquilinos();
@@ -1826,7 +1829,7 @@ function recriarAcessoInquilino(inqId) {
     toast('CPF não cadastrado — edite o inquilino e preencha o CPF primeiro', 'error');
     return;
   }
-  let u = DB.usuarios.find(x => x.perfil === 'inquilino' && x.inquilinoId === inqId);
+  let u = DB.usuarios.find(x => x.perfil === 'inquilino' && Number(x.inquilinoId) === Number(inqId));
   if (u) {
     u.usuario = cpfLimpo;
     u.senha   = cpfLimpo;
@@ -1858,7 +1861,7 @@ function enviarAcessoWhatsapp(inqId) {
   if (!inq) return;
   const fone = (inq.celular || inq.telefone || '').replace(/\D/g, '');
   if (!fone) { toast('Celular do inquilino não cadastrado', 'error'); return; }
-  const u = DB.usuarios.find(x => x.perfil === 'inquilino' && x.inquilinoId === inqId && x.ativo);
+  const u = DB.usuarios.find(x => x.perfil === 'inquilino' && Number(x.inquilinoId) === Number(inqId) && x.ativo);
   if (!u) { toast('Inquilino não possui acesso criado — clique em 🔑 Acesso primeiro', 'error'); return; }
   const appUrl = DB.config.email?.appUrl || window.location.origin;
   const texto =
@@ -1888,7 +1891,7 @@ function resetarSenhaInquilino(userId) {
 // Abre modal para criar acesso manualmente para inquilino sem perfil
 function openCriarAcessoInquilino() {
   const semAcesso = _myData(DB.inquilinos).filter(i =>
-    !DB.usuarios.some(u => u.perfil === 'inquilino' && u.inquilinoId === i.id && u.ativo)
+    !DB.usuarios.some(u => u.perfil === 'inquilino' && Number(u.inquilinoId) === Number(i.id) && u.ativo)
   );
   const sel = document.getElementById('criar-acesso-inq-select');
   const info = document.getElementById('criar-acesso-inq-info');
@@ -1920,7 +1923,7 @@ function salvarAcessoInquilino() {
     toast('Este inquilino não possui CPF cadastrado. Edite o cadastro e preencha o CPF primeiro.', 'error');
     return;
   }
-  const jaExiste = DB.usuarios.find(u => u.perfil === 'inquilino' && u.inquilinoId === inqId);
+  const jaExiste = DB.usuarios.find(u => u.perfil === 'inquilino' && Number(u.inquilinoId) === Number(inqId));
   if (jaExiste) {
     jaExiste.usuario = cpfLimpo;
     jaExiste.senha   = cpfLimpo;
@@ -3420,7 +3423,7 @@ function renderFinanceiro() {
   // Filtro de busca
   if (search) {
     list = list.filter(f =>
-      f.contrato.toLowerCase().includes(search) ||
+      (f.contrato || '').toLowerCase().includes(search) ||
       (f.inquilino || '').toLowerCase().includes(search)
     );
   }
@@ -5248,7 +5251,7 @@ function copiarLinhaDigitavel() {
 // Retorna bloco de credenciais do inquilino para compor mensagens WhatsApp
 function _textoAcessoInquilino(inqId) {
   if (!inqId) return '';
-  const u = DB.usuarios.find(x => x.perfil === 'inquilino' && x.inquilinoId === inqId && x.ativo);
+  const u = DB.usuarios.find(x => x.perfil === 'inquilino' && Number(x.inquilinoId) === Number(inqId) && x.ativo);
   if (!u) return '';
   const appUrl = _emailEmpConfig().appUrl || DB.config.email?.appUrl || window.location.origin;
   return (

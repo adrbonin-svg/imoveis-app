@@ -767,10 +767,17 @@ async function rodarAlertas(filtroEmpresaId = null) {
     }
 
     // 1. Cobranças pendentes/atrasadas
+    // Campo real: dataPagamento (não "vencimento"). Pago = baixaManual+valorRecebido >= total OU Asaas confirmado.
     const cobrancas = (data.financeiro || [])
-      .filter(f => f.empresaId === emp.id && f.status !== 'pago' && f.vencimento)
+      .filter(f => {
+        if (f.empresaId !== emp.id) return false;
+        if (!f.dataPagamento || f.tipo === 'caucao') return false;
+        const isFinPago = (f.baixaManual && (f.valorRecebido||0) >= (f.totalGeral||f.valorContrato||1))
+          || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
+        return !isFinPago && (f.totalGeral||f.valorContrato||0) > 0;
+      })
       .map(f => {
-        const venc = new Date(f.vencimento + 'T12:00:00'); venc.setHours(0,0,0,0);
+        const venc = new Date(f.dataPagamento + 'T12:00:00'); venc.setHours(0,0,0,0);
         const diff = Math.round((hoje - venc) / 86400000);
         if (venc > hoje) return null; // futuro, ignora
         return { ...f, _atraso: diff > 0, _diasAtraso: diff };
@@ -778,10 +785,15 @@ async function rodarAlertas(filtroEmpresaId = null) {
       .filter(Boolean);
 
     // 2. Contratos vencendo em 30 dias
+    // Campo real: dataTermino (não "termino")
     const contratos = (data.contratos || [])
-      .filter(c => c.empresaId === emp.id && c.status !== 'encerrado' && c.termino)
+      .filter(c => {
+        const _termino = c.dataTermino || c.termino;
+        return c.empresaId === emp.id && (c.status||'').toUpperCase() === 'ATIVO' && _termino;
+      })
       .map(c => {
-        const term = new Date(c.termino + 'T12:00:00'); term.setHours(0,0,0,0);
+        const _termino = c.dataTermino || c.termino;
+        const term = new Date(_termino + 'T12:00:00'); term.setHours(0,0,0,0);
         const diff = Math.round((term - hoje) / 86400000);
         if (diff < 0 || diff > 30) return null;
         return { ...c, _diasRestantes: diff };
@@ -789,10 +801,12 @@ async function rodarAlertas(filtroEmpresaId = null) {
       .filter(Boolean);
 
     // 3. Manutenções preventivas com alerta
+    // Campo real: proximaExecucao (não "dataProxima")
     const manutencoes = (data.manutencaoPreventiva || [])
-      .filter(m => m.empresaId === emp.id && m.alertar && m.dataProxima)
+      .filter(m => m.empresaId === emp.id && m.alertar && (m.proximaExecucao || m.dataProxima))
       .map(m => {
-        const prox = new Date(m.dataProxima + 'T12:00:00'); prox.setHours(0,0,0,0);
+        const _prox = m.proximaExecucao || m.dataProxima;
+        const prox = new Date(_prox + 'T12:00:00'); prox.setHours(0,0,0,0);
         const diff = Math.round((prox - hoje) / 86400000);
         if (diff > 7) return null; // alerta só até 7 dias antes
         return { ...m, _vencida: diff < 0, _diasRestantes: Math.abs(diff) };
