@@ -6997,28 +6997,43 @@ function auditLimparFiltros() {
 // ── NOTIFICAÇÕES POR E-MAIL ────────────────────────────
 
 async function _enviarEmailInquilino(template, inqId, dadosExtras = {}) {
-  const inq = DB.inquilinos.find(x => x.id === inqId);
-  if (!inq?.email) {
-    toast('Inquilino não possui e-mail cadastrado', 'error');
+  // Normaliza tipo: inquilinoId pode ser string ou número dependendo da origem
+  const inq = DB.inquilinos.find(x => Number(x.id) === Number(inqId));
+  if (!inq) {
+    toast('Inquilino não encontrado para envio de e-mail', 'error');
+    return false;
+  }
+  if (!inq.email) {
+    toast(`Inquilino ${inq.nome} não possui e-mail cadastrado`, 'error');
     return false;
   }
   const ec = _emailEmpConfig();
+  // smtpConfig só é enviado se empresa tem user E pass configurados
+  // Caso contrário o servidor usa a configuração global do .env (fallback)
+  const smtpConfig = (ec.user && ec.pass) ? ec : null;
   try {
     const res = await fetch('/api/email/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         template,
-        to: inq.email,
+        to:   inq.email,
         dados: { nome: inq.nome, ...dadosExtras },
-        smtpConfig: (ec.user && ec.pass) ? ec : null,
+        smtpConfig,
       }),
     });
     const data = await res.json();
-    if (!data.ok) throw new Error(data.error);
+    if (!data.ok) {
+      // Mensagem específica se for problema de configuração
+      if (data.error?.includes('configurad')) {
+        throw new Error('E-mail não configurado — vá em Configurações > E-mail e salve os dados SMTP');
+      }
+      throw new Error(data.error);
+    }
     return true;
   } catch (err) {
     toast(`Falha ao enviar e-mail: ${err.message}`, 'error');
+    console.error('[Email]', err.message);
     return false;
   }
 }
@@ -7057,24 +7072,26 @@ async function _fichaNotificarAcesso() {
 }
 
 async function carregarConfigEmail() {
-  // Migração one-time: empresa 1 sem emailConfig → buscar campos não-secretos do servidor (.env)
+  // Migração: qualquer empresa sem emailConfig → pré-preencher com dados do servidor (.env)
+  // Apenas campos não-secretos — pass precisa ser re-inserido pelo admin uma vez
   const emp = _empresaAtual();
-  if (emp && emp.id === 1 && !emp.emailConfig?.user) {
+  if (emp && !emp.emailConfig?.user) {
     try {
       const r = await fetch('/api/email/config');
       const srv = await r.json();
       if (srv.user || srv.host) {
+        const srvPort = srv.port || 465;
         _setEmailEmpConfig({
           host:   srv.host   || 'smtp.gmail.com',
-          port:   srv.port   || 465,
-          secure: srv.secure !== false,
+          port:   srvPort,
+          secure: srvPort !== 587,         // auto-detect baseado na porta
           user:   srv.user   || '',
           from:   srv.from   || srv.user || '',
-          appUrl: srv.appUrl || '',
-          // pass não é retornado pelo servidor por segurança — admin deverá re-inserir uma vez
+          appUrl: srv.appUrl || window.location.origin,
+          // pass não retornado por segurança — admin inserirá uma vez e ficará salvo
         });
       }
-    } catch(e) {}
+    } catch(e) { console.warn('[Email] Falha ao carregar config do servidor:', e.message); }
   }
 
   const ec  = _emailEmpConfig();
@@ -7096,16 +7113,20 @@ async function salvarConfigEmail() {
   const get  = id => document.getElementById(id)?.value.trim() || '';
   const pass = get('email-pass');
   if (!get('email-user')) { toast('Informe o e-mail do remetente', 'error'); return; }
-  if (!pass) { toast('Informe a senha do app', 'error'); return; }
+  if (!pass) { toast('Informe a senha do app (App Password)', 'error'); return; }
+
+  const port   = parseInt(get('email-port')) || 465;
+  // secure: true para porta 465 (SSL direto), false para 587 (STARTTLS)
+  const secure = port !== 587;
 
   _setEmailEmpConfig({
     host:   get('email-host')   || 'smtp.gmail.com',
-    port:   parseInt(get('email-port')) || 465,
-    secure: true,
+    port,
+    secure,
     user:   get('email-user'),
     pass,
     from:   get('email-from')   || get('email-user'),
-    appUrl: get('email-appUrl') || '',
+    appUrl: get('email-appUrl') || window.location.origin,
   });
 
   document.getElementById('email-pass').value = '';
