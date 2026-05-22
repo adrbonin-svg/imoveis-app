@@ -4278,8 +4278,9 @@ function openUsuario(id = null) {
   document.getElementById('usr-senha-label').textContent = id ? 'Nova Senha (deixe vazio para manter)' : 'Senha *';
 
   let permExistente = {};
+  let u = null;
   if (id) {
-    const u = DB.usuarios.find(x => x.id === id);
+    u = DB.usuarios.find(x => x.id === id);
     if (!u) return;
     form.elements['nome'].value    = u.nome;
     form.elements['email'].value   = u.email || '';
@@ -4291,7 +4292,7 @@ function openUsuario(id = null) {
 
   document.getElementById('usr-perm-grid').innerHTML = _buildPermTable(permExistente);
   usrTogglePerfil(form.elements['perfil']);
-  if (id && u.perfil === 'inquilino' && u.inquilinoId) {
+  if (u?.perfil === 'inquilino' && u.inquilinoId) {
     document.getElementById('usr-campo-inquilinoId').value = u.inquilinoId;
   }
   modal.classList.add('open');
