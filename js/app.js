@@ -4633,6 +4633,12 @@ async function testAsaasConnection() {
   const dot  = document.getElementById('asaas-status-dot');
   const text = document.getElementById('asaas-status-text');
   if (!dot) return;
+  const ac = _asaasEmpConfig();
+  if (!ac.apiKey) {
+    dot.style.background = '#9ca3af';
+    text.textContent = 'Nenhuma chave Asaas configurada para esta empresa';
+    return;
+  }
   if (!_asaasServer()) {
     dot.style.background  = '#f59e0b';
     text.textContent = '⚠️ Abra o sistema via servidor (node server.js) para usar a integração';
@@ -4647,7 +4653,7 @@ async function testAsaasConnection() {
       text.textContent = `✅ Conectado — ${res.account.name} (${res.env})`;
     } else {
       dot.style.background  = '#e02424';
-      text.textContent = `❌ Erro: ${JSON.stringify(res.account?.errors?.[0]?.description || 'Verifique a chave no arquivo .env')}`;
+      text.textContent = `❌ Erro: ${res.account?.errors?.[0]?.description || 'Verifique a chave configurada'}`;
     }
   } catch {
     dot.style.background  = '#e02424';
@@ -5486,14 +5492,8 @@ function renderConfig() {
   if (kwhEl) kwhEl.value = energia.valorKwh > 0 ? energia.valorKwh : '';
   toggleEnergiaConfig();
 
-  // Asaas
-  const asaas = DB.config.asaas || {};
-  const elAtivo = document.getElementById('cfg-asaas-ativo');
-  const elAuto  = document.getElementById('cfg-asaas-autogerar');
-  if (elAtivo) elAtivo.checked = asaas.ativo || false;
-  if (elAuto)  elAuto.checked  = asaas.autoGerar || false;
-  const elBenef = document.getElementById('cfg-asaas-beneficiario');
-  if (elBenef) elBenef.value = asaas.nomeBeneficiario || '';
+  // Asaas — config por empresa
+  _carregarAsaasAtual();
 
   // URL do webhook
   const webhookEl = document.getElementById('asaas-webhook-url');
@@ -5502,16 +5502,16 @@ function renderConfig() {
     webhookEl.textContent = `${base}/webhook/asaas`;
   }
 
-  // Carrega chave mascarada e ambiente atual do servidor
-  _carregarAsaasAtual();
-
-  // Testa conexão automaticamente se ativo
-  if (asaas.ativo && _asaasServer()) testAsaasConnection();
+  // Testa conexão apenas se esta empresa tiver chave configurada
+  const ac = _asaasEmpConfig();
+  if (ac.ativo && ac.apiKey && _asaasServer()) testAsaasConnection();
   else {
     const dot  = document.getElementById('asaas-status-dot');
     const text = document.getElementById('asaas-status-text');
     if (dot)  dot.style.background = '#9ca3af';
-    if (text) text.textContent = _asaasServer() ? 'Configure sua chave API abaixo' : '⚠️ Abra via servidor (node server.js)';
+    if (text) text.textContent = ac.apiKey
+      ? 'Integração desativada para esta empresa'
+      : 'Nenhuma chave Asaas configurada para esta empresa';
   }
 }
 
