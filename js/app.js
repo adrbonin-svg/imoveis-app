@@ -1,3 +1,7 @@
+// ── VERSÃO DO SISTEMA ──────────────────────────────────────
+const APP_VERSION = '2026.05.22-v47';
+// ────────────────────────────────────────────────────────────
+
 // ── MODELO PADRÃO DE CONTRATO (usado por resetModeloContrato) ──────────────
 const DB_DEFAULT_MODELO = `CONTRATO DE LOCAÇÃO RESIDENCIAL — {{IMOVEL_NOME}}
 
@@ -603,10 +607,226 @@ function _mostrarApp() {
   // Navega para primeira página acessível
   const first = PAGINAS_PERM.find(p => _temPermissao(p.id));
   navigate(u.perfil === 'admin' ? 'dashboard' : (first?.id || 'dashboard'));
+  // Gera notificações após login
+  setTimeout(gerarNotificacoes, 500);
 }
 
 function toggleUserDropdown() {
   document.getElementById('topbar-user-dropdown').classList.toggle('open');
+}
+
+// ── SINO DE NOTIFICAÇÕES ────────────────────────────────
+
+function _notifNextId() {
+  const arr = DB.notificacoes || [];
+  return arr.length ? Math.max(...arr.map(n => n.id)) + 1 : 1;
+}
+
+function _tempoRelativo(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'agora';
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  return `há ${Math.floor(h / 24)} dia(s)`;
+}
+
+function gerarNotificacoes() {
+  if (!_currentUser || _currentUser.perfil === 'inquilino') return;
+  if (!Array.isArray(DB.notificacoes)) DB.notificacoes = [];
+
+  const hoje  = new Date(); hoje.setHours(0, 0, 0, 0);
+  const empId = _currentEmpresaId();
+
+  // Remove notificações de manutenção que voltaram ao status 'ok' (preventiva concluída/reagendada)
+  const idsAtivas = new Set(_myData(DB.manutencaoPreventiva)
+    .filter(m => _prevAlertStatus(m) !== 'ok').map(m => m.id));
+  DB.notificacoes = DB.notificacoes.filter(n =>
+    n.tipo !== 'manutencao' || n.empresaId !== empId || idsAtivas.has(n.referenceId)
+  );
+
+  const jaExiste = (tipo, refId) =>
+    DB.notificacoes.some(n => n.tipo === tipo && n.referenceId === refId && n.empresaId === empId);
+
+  let novas = 0;
+
+  // 1. Cobranças pendentes / em atraso
+  _myData(DB.financeiro).forEach(f => {
+    if (f.status === 'pago' || !f.vencimento) return;
+    const venc = new Date(f.vencimento + 'T12:00:00'); venc.setHours(0, 0, 0, 0);
+    if (venc > hoje) return;
+    if (jaExiste('cobranca', f.id)) return;
+    const dias = Math.round((hoje - venc) / 86400000);
+    DB.notificacoes.push({
+      id: _notifNextId(),
+      tipo: 'cobranca',
+      icone: '💰',
+      bgCor: '#fee2e2',
+      titulo: dias > 0 ? `Cobrança em atraso — ${dias} dia(s)` : 'Cobrança vence hoje',
+      descricao: `${f.inquilino || 'Inquilino'} — R$ ${(f.totalGeral || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+      lido: false,
+      criadoEm: new Date().toISOString(),
+      empresaId: empId,
+      referenceId: f.id,
+    });
+    novas++;
+  });
+
+  // 2. Contratos vencendo em 30 dias
+  _myData(DB.contratos).forEach(c => {
+    if (c.status === 'encerrado' || !c.termino) return;
+    const term = new Date(c.termino + 'T12:00:00'); term.setHours(0, 0, 0, 0);
+    const diff = Math.round((term - hoje) / 86400000);
+    if (diff < 0 || diff > 30) return;
+    if (jaExiste('contrato', c.id)) return;
+    DB.notificacoes.push({
+      id: _notifNextId(),
+      tipo: 'contrato',
+      icone: '📄',
+      bgCor: '#fef9c3',
+      titulo: `Contrato vence em ${diff} dia(s)`,
+      descricao: `${c.inquilino || '—'} — ${c.imovel || '—'}`,
+      lido: false,
+      criadoEm: new Date().toISOString(),
+      empresaId: empId,
+      referenceId: c.id,
+    });
+    novas++;
+  });
+
+  // 3. Manutenções preventivas com alerta (usa _prevAlertStatus)
+  _myData(DB.manutencaoPreventiva).forEach(m => {
+    const st = _prevAlertStatus(m);
+    if (st === 'ok') return;
+    if (jaExiste('manutencao', m.id)) return;
+    const prox = m.proximaExecucao ? new Date(m.proximaExecucao + 'T12:00:00') : null;
+    prox?.setHours(0, 0, 0, 0);
+    const diff = prox ? Math.round((prox - hoje) / 86400000) : -1;
+    DB.notificacoes.push({
+      id: _notifNextId(),
+      tipo: 'manutencao',
+      icone: '🔧',
+      bgCor: '#dbeafe',
+      titulo: st === 'vencida'
+        ? `🔧 Manutenção vencida — ${Math.abs(diff)} dia(s) atrás`
+        : `🔧 Manutenção em ${diff} dia(s)`,
+      descricao: `${m.titulo || '—'}${m.imovel ? ' — ' + m.imovel : ''}`,
+      lido: false,
+      criadoEm: new Date().toISOString(),
+      empresaId: empId,
+      referenceId: m.id,
+    });
+    novas++;
+  });
+
+  if (novas > 0) saveData();
+  renderCampainhaNotif();
+}
+
+function renderCampainhaNotif() {
+  if (!Array.isArray(DB.notificacoes)) DB.notificacoes = [];
+  const notifs   = _myData(DB.notificacoes).slice().reverse();
+  const naoLidas = notifs.filter(n => !n.lido);
+  const cnt      = naoLidas.length;
+
+  const badge = document.getElementById('notif-badge');
+  const btn   = document.getElementById('notif-btn');
+  const txt   = document.getElementById('notif-nao-lidas-txt');
+  if (badge) { badge.textContent = cnt > 99 ? '99+' : cnt; badge.style.display = cnt > 0 ? '' : 'none'; }
+  if (btn)   btn.classList.toggle('notif-ativa', cnt > 0);
+  if (txt)   txt.textContent = cnt > 0 ? `${cnt} não lida${cnt > 1 ? 's' : ''}` : '';
+
+  const lista = document.getElementById('notif-lista');
+  if (!lista) return;
+
+  if (notifs.length === 0) {
+    lista.innerHTML = '<div class="notif-vazia">✅ Tudo em dia!<br><span style="font-size:11px">Nenhuma notificação pendente.</span></div>';
+    return;
+  }
+
+  lista.innerHTML = notifs.map(n => `
+    <div class="notif-item ${n.lido ? 'notif-lida' : ''}" onclick="marcarLidoNotif(${n.id})" style="cursor:pointer">
+      <div class="notif-item-icone" style="background:${n.bgCor || '#f3f4f6'}">${n.icone || '🔔'}</div>
+      <div class="notif-item-corpo">
+        <div class="notif-item-titulo">
+          ${!n.lido ? '<span class="notif-dot"></span>' : ''}
+          ${n.titulo}
+        </div>
+        <div class="notif-item-desc">${n.descricao}</div>
+        <div class="notif-item-tempo">${_tempoRelativo(n.criadoEm)}</div>
+      </div>
+      <button class="notif-item-del" onclick="event.stopPropagation();excluirNotificacao(${n.id})" title="Excluir">✕</button>
+    </div>`).join('');
+}
+
+function toggleNotificacoes() {
+  const dd = document.getElementById('notif-dropdown');
+  if (!dd) return;
+  const abrindo = !dd.classList.contains('open');
+  dd.classList.toggle('open', abrindo);
+  if (abrindo) renderCampainhaNotif();
+}
+
+function marcarLidoNotif(id) {
+  const n = (DB.notificacoes || []).find(x => x.id === id);
+  if (n && !n.lido) { n.lido = true; saveData(); renderCampainhaNotif(); }
+}
+
+function excluirNotificacao(id) {
+  if (!Array.isArray(DB.notificacoes)) return;
+  DB.notificacoes = DB.notificacoes.filter(n => n.id !== id);
+  saveData();
+  renderCampainhaNotif();
+}
+
+// ── Alertas automáticos ─────────────────────────────────
+async function testarAlertas() {
+  const btn    = document.querySelector('[onclick="testarAlertas()"]');
+  const status = document.getElementById('alertas-status');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Enviando...'; }
+  if (status) status.textContent = '';
+  try {
+    const res = await fetch('/api/alertas/testar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ empresaId: _currentEmpresaId() }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const msg = data.enviados > 0
+        ? `✅ ${data.enviados} e-mail(s) enviado(s) com sucesso!`
+        : '⚠️ Nenhum alerta encontrado ou nenhum e-mail configurado.';
+      toast(msg, data.enviados > 0 ? 'success' : 'warning');
+      if (status) status.textContent = msg;
+    } else {
+      toast('Erro ao enviar alertas: ' + (data.error || 'desconhecido'), 'error');
+      if (status) status.textContent = '❌ ' + (data.error || 'Erro');
+    }
+  } catch (e) {
+    toast('Erro de conexão ao enviar alertas', 'error');
+    if (status) status.textContent = '❌ Erro de conexão';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Enviar Relatório Agora'; }
+  }
+}
+
+// ── Tutorial ────────────────────────────────────────────
+function openTutorial() {
+  document.getElementById('modal-tutorial').classList.add('open');
+  showTutSection('dashboard');
+}
+function closeTutorial() {
+  document.getElementById('modal-tutorial').classList.remove('open');
+}
+function showTutSection(id) {
+  document.querySelectorAll('.tut-section').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tut-nav-item').forEach(el => el.classList.remove('active'));
+  const sec = document.getElementById('tut-' + id);
+  if (sec) sec.classList.add('active');
+  const nav = document.querySelector(`.tut-nav-item[data-tut="${id}"]`);
+  if (nav) nav.classList.add('active');
 }
 
 // ── ESQUECI A SENHA ────────────────────────────────────
@@ -666,6 +886,13 @@ function closeSidebar() {
 document.addEventListener('click', e => {
   if (!document.getElementById('topbar-user-btn')?.contains(e.target))
     document.getElementById('topbar-user-dropdown')?.classList.remove('open');
+  // Fechar notificações ao clicar fora
+  const notifW = document.querySelector('.notif-wrapper');
+  if (notifW && !notifW.contains(e.target))
+    document.getElementById('notif-dropdown')?.classList.remove('open');
+  // Fechar tutorial ao clicar no overlay (fora do modal)
+  const tut = document.getElementById('modal-tutorial');
+  if (tut?.classList.contains('open') && e.target === tut) closeTutorial();
 });
 
 // ── NAVEGAÇÃO ──────────────────────────────────────────
@@ -2593,6 +2820,15 @@ function saveContrato() {
   const _parcelaMsg = qtdParcelas > 0 ? ` ${qtdParcelas} parcela${qtdParcelas > 1 ? 's' : ''} gerada${qtdParcelas > 1 ? 's' : ''}.` : '';
   const _caucaoMsg  = qtdCaucao  > 0 ? ` ${qtdCaucao} entrada${qtdCaucao > 1 ? 's' : ''} de caução lançada${qtdCaucao > 1 ? 's' : ''}.` : '';
   toast((id ? 'Contrato atualizado!' : 'Contrato cadastrado!') + _parcelaMsg + _caucaoMsg, 'success');
+
+  // Auto-geração de boletos para parcelas do novo contrato
+  if (!id && qtdParcelas > 0 && _asaasAtivo() && _asaasEmpConfig().autoGerar) {
+    const novoContratoCod = DB.contratos[DB.contratos.length - 1]?.codigo;
+    const parcelas = _myData(DB.financeiro)
+      .filter(f => f.contrato === novoContratoCod && !f.asaasPaymentId && f.tipo !== 'caucao')
+      .sort((a, b) => a.dataPagamento.localeCompare(b.dataPagamento));
+    parcelas.forEach((p, i) => setTimeout(() => gerarBoleto(p.id), 600 + i * 400));
+  }
 }
 
 // Arredonda para 2 casas
@@ -2909,11 +3145,11 @@ function gerarContrato(id) {
     return `<p style="margin:4px 0">${l}</p>`;
   }).join('');
 
-  // Painel de diagnóstico do inquilino vinculado
+  // Painel de diagnóstico do inquilino vinculado (só aparece na tela, nunca no PDF)
   const inqTelefone = inq.celular || inq.telefone || '';
   const isPhoneWrong = !!inqTelefone && inqTelefone === (loc.telefone || '');
   const inqInfoBar = `
-<div class="preview-inq-info${isPhoneWrong ? ' preview-inq-warn' : ''}">
+<div class="preview-inq-info no-print${isPhoneWrong ? ' preview-inq-warn' : ''}">
   <div class="preview-inq-row">
     <span><strong>Inquilino vinculado:</strong> ${inq.nome || c.inquilino || '—'}${inq.id ? ` <small style="color:var(--gray-400)">(ID: ${inq.id})</small>` : ' <span class="preview-field-empty">(não encontrado no cadastro)</span>'}</span>
     <span><strong>Celular:</strong> <span class="${!inq.celular ? 'preview-field-empty' : ''}">${inq.celular || '(vazio)'}</span></span>
@@ -2929,12 +3165,26 @@ function gerarContrato(id) {
 }
 
 function imprimirContrato() {
+  // Chrome exige desmarcar "Cabeçalhos e rodapés" no diálogo — dica visual para o usuário
+  const tip = document.createElement('div');
+  tip.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#1e40af;color:#fff;padding:14px 18px;border-radius:10px;font-size:13px;z-index:99999;max-width:340px;box-shadow:0 6px 20px rgba(0,0,0,.35);line-height:1.5';
+  tip.innerHTML = '🖨️ <strong>Na janela de impressão:</strong><br>Clique em <em>"Mais configurações"</em> e desmarque <strong>"Cabeçalhos e rodapés"</strong> para remover a data/hora.';
+  document.body.appendChild(tip);
+  setTimeout(() => tip.remove(), 9000);
+
   const body = document.getElementById('modal-ct-preview-body').innerHTML;
   const w = window.open('', '_blank');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Contrato</title>
+  w.document.title = ' ';
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title> </title>
     <style>
-      body { font-family: 'Times New Roman', serif; font-size: 12pt; margin: 2cm; color: #000; }
+      @page { size: A4; margin: 0; }
+      body {
+        font-family: 'Times New Roman', serif; font-size: 12pt; color: #000;
+        margin: 0; padding: 2cm;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
+      }
       p { margin: 4px 0; line-height: 1.6; }
+      .no-print { display: none !important; }
     </style>
     </head><body>${body}<script>window.onload=()=>{window.print();window.close();}<\/script></body></html>`);
   w.document.close();
@@ -3133,6 +3383,8 @@ function finToggleTodos() {
 
 function renderFinanceiro() {
   finInitPeriodo();
+  const btnSync = document.getElementById('btn-sync-asaas');
+  if (btnSync) btnSync.style.display = _asaasAtivo() ? '' : 'none';
   const search  = (document.getElementById('fin-search')?.value || '').toLowerCase();
   const todos   = document.getElementById('fin-btn-todos')?.classList.contains('active');
   const mes     = parseInt(document.getElementById('fin-sel-mes')?.value);
@@ -3346,15 +3598,39 @@ function irParaFinanceiro(id, codigoContrato) {
 }
 
 function autoFillContratoValor() {
-  const form = document.getElementById('form-financeiro');
-  const cod  = form.elements['contrato'].value;
-  const c    = DB.contratos.find(x => x.codigo === cod);
+  const form  = document.getElementById('form-financeiro');
+  const cod   = form.elements['contrato'].value;
+  const c     = DB.contratos.find(x => x.codigo === cod);
+  const isNew = !form.dataset.id;
+  const infoEl = document.getElementById('fin-leitura-ant-info');
+  if (infoEl) infoEl.style.display = 'none';
   if (c) {
     form.elements['valorContrato'].value               = (c.valorMensal    || 0).toFixed(2);
     form.elements['consumoAgua'].value                 = (c.taxaAgua       || 0).toFixed(2);
     form.elements['taxaManutencao'].value              = (c.taxaManutencao || 0).toFixed(2);
     form.elements['taxasExtras'].value                 = (c.taxasExtras    || 0).toFixed(2);
-    if (c.inquilino) form.elements['inquilino'].value  = c.inquilino;
+    if (c.inquilino) {
+      form.elements['inquilino'].value = c.inquilino;
+      // Novo registro: auto-preenche leituraAnterior e valorKwh com último registro do inquilino
+      if (isNew) {
+        const ultima = _ultimaLeituraEnergia(c.inquilino);
+        if (ultima) {
+          const lAnt = form.elements['leituraAnterior'];
+          if (lAnt && !parseFloat(lAnt.value)) {
+            lAnt.value = ultima.leitura.toFixed(3);
+            if (infoEl) {
+              infoEl.textContent = `⚡ Preenchido automaticamente — leitura de ${fmtDate(ultima.data)}`;
+              infoEl.style.display = '';
+            }
+          }
+          const kwhEl = form.elements['valorKwh'];
+          if (kwhEl && !parseFloat(kwhEl.value) && ultima.valorKwh > 0)
+            kwhEl.value = ultima.valorKwh.toFixed(4);
+        }
+      }
+      const btnHist = document.getElementById('btn-energia-hist');
+      if (btnHist) btnHist.style.display = '';
+    }
   }
   _aplicarEnergiaNoForm();
   calcFinanceiro();
@@ -3398,9 +3674,27 @@ function openFinanceiro(id = null) {
     el('observacoes').value     = f.observacoes     || '';
     el('dataBaixa').value       = f.dataBaixa       || '';
     el('formaPagamento').value  = f.formaPagamento  || '';
-    // restaura cor de atraso
     el('diasAtraso').classList.toggle('em-atraso', (f.diasAtraso || 0) > 0);
     _renderFinComprovanteZone();
+    // Auto-preenche leituraAnterior e valorKwh se vazios, buscando último registro do inquilino
+    const infoEl2 = document.getElementById('fin-leitura-ant-info');
+    if (infoEl2) infoEl2.style.display = 'none';
+    if (f.inquilino) {
+      const btnHist = document.getElementById('btn-energia-hist');
+      if (btnHist) btnHist.style.display = '';
+      if (!(f.leituraAnterior || 0)) {
+        const ultima = _ultimaLeituraEnergia(f.inquilino, id, f.dataPagamento);
+        if (ultima) {
+          el('leituraAnterior').value = ultima.leitura.toFixed(3);
+          if (infoEl2) {
+            infoEl2.textContent = `⚡ Preenchido automaticamente — leitura de ${fmtDate(ultima.data)}`;
+            infoEl2.style.display = '';
+          }
+          if (!(f.valorKwh || 0) && ultima.valorKwh > 0)
+            el('valorKwh').value = ultima.valorKwh.toFixed(4);
+        }
+      }
+    }
   }
   _aplicarEnergiaNoForm();
   calcFinanceiro();
@@ -3456,6 +3750,25 @@ function saveFinanceiro() {
     const novoFin = DB.financeiro[DB.financeiro.length - 1];
     _auditLog('criar', 'financeiro', novoFin.id, data.contrato, null, novoFin);
   }
+
+  // Propagação automática: ao salvar leituraAtual, atualiza leituraAnterior do próximo mês do mesmo inquilino
+  if ((data.leituraAtual || 0) > 0 && data.inquilino) {
+    const savedId = id || DB.financeiro[DB.financeiro.length - 1]?.id;
+    const proximo = _myData(DB.financeiro)
+      .filter(f =>
+        f.inquilino === data.inquilino &&
+        f.dataPagamento > data.dataPagamento &&
+        (f.leituraAnterior || 0) === 0 &&
+        f.tipo !== 'caucao' &&
+        f.id !== savedId
+      )
+      .sort((a, b) => a.dataPagamento.localeCompare(b.dataPagamento))[0];
+    if (proximo) {
+      const pIdx = DB.financeiro.findIndex(x => x.id === proximo.id);
+      if (pIdx >= 0) DB.financeiro[pIdx].leituraAnterior = data.leituraAtual;
+    }
+  }
+
   saveData();
   closeModal('modal-financeiro');
   renderFinanceiro();
@@ -3463,7 +3776,7 @@ function saveFinanceiro() {
   toast(id ? 'Pagamento atualizado!' : 'Pagamento registrado!', 'success');
 
   // Auto-geração de boleto (apenas novos registros)
-  if (!id && DB.config.asaas?.ativo && DB.config.asaas?.autoGerar) {
+  if (!id && _asaasAtivo() && _asaasEmpConfig().autoGerar) {
     const novo = DB.financeiro[DB.financeiro.length - 1];
     setTimeout(() => gerarBoleto(novo.id), 400);
   }
@@ -4754,27 +5067,56 @@ async function gerarBoleto(finId) {
       customerId = custRes.customer.id;
     }
 
-    // 2) Monta detalhamento de valores para as observações do boleto
-    const linhasObs = [];
-    if ((f.valorContrato || 0) > 0)
-      linhasObs.push(`Aluguel: R$ ${(f.valorContrato).toFixed(2).replace('.',',')}`);
-    if ((f.consumoAgua || 0) > 0)
-      linhasObs.push(`Taxa de Agua: R$ ${(f.consumoAgua).toFixed(2).replace('.',',')}`);
-    if ((f.taxaManutencao || 0) > 0)
-      linhasObs.push(`Taxa de Manutencao: R$ ${(f.taxaManutencao).toFixed(2).replace('.',',')}`);
-    if ((f.taxasExtras || 0) > 0)
-      linhasObs.push(`Taxas Extras: R$ ${(f.taxasExtras).toFixed(2).replace('.',',')}`);
+    // 2) Monta detalhamento de valores para as observações (interno) e instruções (impresso no boleto)
+    const linhasObs  = [];
+    const linhasInst = [];
+
+    // Referência no topo das instruções
+    const _fmt2 = v => Number(v).toFixed(2).replace('.', ',');
+    const _nomeLoc = _asaasEmpConfig().nomeBeneficiario || DB.config.locador?.nome || 'Locador';
+    linhasInst.push(`Ref.: ${f.contrato} | Inquilino: ${f.inquilino || contrato?.inquilino || ''} | Venc.: ${fmtDate(f.dataPagamento)}`);
+
+    if ((f.valorContrato || 0) > 0) {
+      linhasObs.push(`Aluguel: R$ ${_fmt2(f.valorContrato)}`);
+      linhasInst.push(`Aluguel: R$ ${_fmt2(f.valorContrato)}`);
+    }
+    if ((f.consumoAgua || 0) > 0) {
+      linhasObs.push(`Taxa de Agua: R$ ${_fmt2(f.consumoAgua)}`);
+      linhasInst.push(`Taxa de Agua: R$ ${_fmt2(f.consumoAgua)}`);
+    }
+    if ((f.taxaManutencao || 0) > 0) {
+      linhasObs.push(`Taxa de Manutencao: R$ ${_fmt2(f.taxaManutencao)}`);
+      linhasInst.push(`Taxa de Manutencao: R$ ${_fmt2(f.taxaManutencao)}`);
+    }
+    if ((f.taxasExtras || 0) > 0) {
+      linhasObs.push(`Taxas Extras: R$ ${_fmt2(f.taxasExtras)}`);
+      linhasInst.push(`Taxas Extras: R$ ${_fmt2(f.taxasExtras)}`);
+    }
     if ((f.totalEnergia || 0) > 0) {
       const kwh = Math.max(0, (f.leituraAtual||0) - (f.leituraAnterior||0));
-      linhasObs.push(`Energia (${kwh} kWh x R$ ${(f.valorKwh||0).toFixed(4).replace('.',',')}): R$ ${(f.totalEnergia).toFixed(2).replace('.',',')}`);
+      linhasObs.push(`Energia (${kwh} kWh x R$ ${(f.valorKwh||0).toFixed(4).replace('.',',')}): R$ ${_fmt2(f.totalEnergia)}`);
+      linhasInst.push(`Energia (${kwh} kWh x R$ ${(f.valorKwh||0).toFixed(4).replace('.',',')}): R$ ${_fmt2(f.totalEnergia)}`);
     }
-    if ((f.valorMulta || 0) > 0)
-      linhasObs.push(`Multa (${f.pctMulta||0}%): R$ ${(f.valorMulta).toFixed(2).replace('.',',')}`);
-    if ((f.valorMora || 0) > 0)
-      linhasObs.push(`Mora (${f.pctMora||0}% x ${f.diasAtraso||0} dias): R$ ${(f.valorMora).toFixed(2).replace('.',',')}`);
-    linhasObs.push(`Total: R$ ${((f.totalGeral || f.valorContrato || 0)).toFixed(2).replace('.',',')}`);
-    if (f.observacoes) linhasObs.push(`Obs: ${f.observacoes}`);
-    const observacoesBoleto = linhasObs.join(' | ');
+    if ((f.valorMulta || 0) > 0) {
+      linhasObs.push(`Multa (${f.pctMulta||0}%): R$ ${_fmt2(f.valorMulta)}`);
+      linhasInst.push(`Multa por atraso (${f.pctMulta||0}%): R$ ${_fmt2(f.valorMulta)}`);
+    }
+    if ((f.valorMora || 0) > 0) {
+      linhasObs.push(`Mora (${f.pctMora||0}% x ${f.diasAtraso||0} dias): R$ ${_fmt2(f.valorMora)}`);
+      linhasInst.push(`Juros de mora (${f.pctMora||0}% ao mes, ${f.diasAtraso||0} dia(s)): R$ ${_fmt2(f.valorMora)}`);
+    }
+
+    const _totalStr = `TOTAL A PAGAR: R$ ${_fmt2(f.totalGeral || f.valorContrato || 0)}`;
+    linhasObs.push(_totalStr);
+    linhasInst.push(_totalStr);
+
+    if (f.observacoes) {
+      linhasObs.push(`Obs: ${f.observacoes}`);
+      linhasInst.push(`Obs: ${f.observacoes}`);
+    }
+
+    const observacoesBoleto  = linhasObs.join(' | ');
+    const instrucoesBoleto   = linhasInst.join('\n');
 
     // 3) Cria pagamento (boleto)
     const payRes = await _asaasCall('POST', '/payment', {
@@ -4782,9 +5124,13 @@ async function gerarBoleto(finId) {
       billingType:   'BOLETO',
       value:         parseFloat(f.totalGeral) || parseFloat(f.valorContrato) || 0,
       dueDate:       f.dataPagamento,
-      description:   `${_asaasEmpConfig().nomeBeneficiario || DB.config.locador?.nome || 'Locador'} — Aluguel ${f.contrato} — ${fmtDate(f.dataPagamento)}`,
+      description:   `${_nomeLoc} — Aluguel ${f.contrato} — ${fmtDate(f.dataPagamento)}`,
       observations:  observacoesBoleto,
+      instructions:  instrucoesBoleto,
       externalReference: String(f.id),
+      // Multa moratória 10% + juros de mora 1% ao mês (calculados automaticamente pelo Asaas)
+      fine:     { value: 10, type: 'PERCENTAGE' },
+      interest: { value: 1,  type: 'PERCENTAGE' },
     });
 
     if (!payRes.ok || !payRes.payment?.id) {
@@ -4883,6 +5229,21 @@ function copiarLinhaDigitavel() {
   if (val) { navigator.clipboard.writeText(val); toast('Linha copiada!', 'success'); }
 }
 
+// Retorna bloco de credenciais do inquilino para compor mensagens WhatsApp
+function _textoAcessoInquilino(inqId) {
+  if (!inqId) return '';
+  const u = DB.usuarios.find(x => x.perfil === 'inquilino' && x.inquilinoId === inqId && x.ativo);
+  if (!u) return '';
+  const appUrl = _emailEmpConfig().appUrl || DB.config.email?.appUrl || window.location.origin;
+  return (
+    `\n\n` +
+    `🔐 *Acesso ao Portal do Inquilino:*\n` +
+    `🌐 Site: ${appUrl}\n` +
+    `👤 Usuário: ${u.usuario}\n` +
+    `🔑 Senha: ${u.senha}`
+  );
+}
+
 function enviarBoletoWhatsapp() {
   const finId = parseInt(document.getElementById('modal-boleto')?.dataset.finId);
   const f = DB.financeiro.find(x => x.id === finId);
@@ -4898,7 +5259,8 @@ function enviarBoletoWhatsapp() {
     (benef ? `Beneficiário: ${benef}\n` : '') +
     `Valor: ${fmt(f.totalGeral || f.valorContrato)}\n` +
     `Linha digitável:\n${f.boletoLinha || ''}\n\n` +
-    (f.asaasPaymentId ? `PDF: ${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf` : '')
+    (f.asaasPaymentId ? `PDF: ${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf` : '') +
+    _textoAcessoInquilino(inq?.id)
   );
   window.open(`https://wa.me/55${fone}?text=${msg}`, '_blank');
 }
@@ -4917,6 +5279,7 @@ function enviarBoletoWhatsappDireto(finId) {
   texto += `Contrato: ${f.contrato}\n`;
   if (f.boletoLinha) texto += `\nLinha digitável:\n${f.boletoLinha}\n`;
   if (f.asaasPaymentId) texto += `\nPDF do boleto:\n${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf`;
+  texto += _textoAcessoInquilino(inq?.id);
   window.open(`https://wa.me/55${fone}?text=${encodeURIComponent(texto)}`, '_blank');
 }
 
@@ -4926,15 +5289,14 @@ function enviarContratoWhatsapp(ctId) {
   const inq = c.inquilino ? DB.inquilinos.find(i => i.nome === c.inquilino) : null;
   const fone = (inq?.celular || inq?.telefone || '').replace(/\D/g, '');
   if (!fone) { toast('Celular do inquilino não cadastrado', 'error'); return; }
-  const appUrl = DB.config.email?.appUrl || window.location.origin;
   const msg = encodeURIComponent(
     `Olá ${c.inquilino || 'inquilino'}, segue as informações do seu contrato de locação.\n\n` +
     `Contrato: ${c.codigo}\n` +
     `Imóvel: ${c.imovel}\n` +
     `Vigência: ${fmtDate(c.dataInicio)} a ${fmtDate(c.dataTermino)}\n` +
     `Valor Mensal: ${fmt(c.valorMensal)}\n` +
-    `Status: ${c.status}\n\n` +
-    `Acesse o portal do inquilino em:\n${appUrl}`
+    `Status: ${c.status}` +
+    _textoAcessoInquilino(inq?.id)
   );
   window.open(`https://wa.me/55${fone}?text=${msg}`, '_blank');
 }
@@ -4954,6 +5316,57 @@ async function cancelarBoleto(finId) {
   } else {
     toast('Erro ao cancelar boleto', 'error');
   }
+}
+
+// Sincroniza status de todos os boletos pendentes consultando diretamente o Asaas
+async function sincronizarStatusPagamentos() {
+  if (!_asaasAtivo() || !_asaasServer()) {
+    toast('Integração Asaas não está ativa', 'error'); return;
+  }
+  const btn = document.getElementById('btn-sync-asaas');
+  const textoOriginal = btn?.textContent || '🔄 Sincronizar';
+  if (btn) { btn.textContent = '⏳ Sincronizando...'; btn.disabled = true; }
+
+  const pendentes = _myData(DB.financeiro).filter(f =>
+    f.asaasPaymentId &&
+    f.asaasStatus !== 'RECEIVED' &&
+    f.asaasStatus !== 'CONFIRMED' &&
+    f.asaasStatus !== 'CANCELED'
+  );
+
+  if (!pendentes.length) {
+    toast('Nenhum boleto pendente para sincronizar', 'success');
+    if (btn) { btn.textContent = textoOriginal; btn.disabled = false; }
+    return;
+  }
+
+  let atualizados = 0;
+  for (const f of pendentes) {
+    try {
+      const res = await _asaasCall('GET', `/payment/${f.asaasPaymentId}`);
+      if (res.ok && res.payment?.status) {
+        const novoStatus = res.payment.status;
+        if (novoStatus !== f.asaasStatus) {
+          const idx = DB.financeiro.findIndex(x => x.id === f.id);
+          if (idx >= 0) {
+            DB.financeiro[idx].asaasStatus = novoStatus;
+            if (novoStatus === 'RECEIVED' || novoStatus === 'CONFIRMED') {
+              DB.financeiro[idx].valorRecebido = res.payment.value || f.totalGeral;
+            }
+            atualizados++;
+          }
+        }
+      }
+    } catch { /* ignora erros individuais */ }
+  }
+
+  if (atualizados > 0) {
+    saveData(); renderFinanceiro(); renderDashboard();
+    toast(`✅ ${atualizados} pagamento${atualizados > 1 ? 's' : ''} atualizado${atualizados > 1 ? 's' : ''}!`, 'success');
+  } else {
+    toast('Nenhuma alteração de status encontrada', 'success');
+  }
+  if (btn) { btn.textContent = textoOriginal; btn.disabled = false; }
 }
 
 // Poll webhook events → baixa automática
@@ -5613,6 +6026,79 @@ function toggleImovelEnergia() {
   if (grp) grp.style.display = tipo === 'solar' ? '' : 'none';
 }
 
+// Retorna a leitura mais recente de um inquilino (leituraAtual, valorKwh e data)
+function _ultimaLeituraEnergia(inquilinoNome, excluirId, anteriorAData) {
+  if (!inquilinoNome) return null;
+  const registros = _myData(DB.financeiro).filter(f =>
+    f.inquilino === inquilinoNome &&
+    (f.leituraAtual || 0) > 0 &&
+    f.tipo !== 'caucao' &&
+    (!excluirId     || f.id !== excluirId) &&
+    (!anteriorAData || f.dataPagamento < anteriorAData)
+  ).sort((a, b) => b.dataPagamento.localeCompare(a.dataPagamento));
+  if (!registros[0]) return null;
+  return {
+    leitura:  registros[0].leituraAtual,
+    valorKwh: registros[0].valorKwh || 0,
+    data:     registros[0].dataPagamento,
+  };
+}
+
+function abrirHistoricoEnergia() {
+  const form = document.getElementById('form-financeiro');
+  const inquilinoNome = form?.elements['inquilino']?.value;
+  if (!inquilinoNome) return;
+
+  document.getElementById('energia-hist-nome').textContent = inquilinoNome;
+
+  const registros = _myData(DB.financeiro)
+    .filter(f => f.inquilino === inquilinoNome && f.tipo !== 'caucao' &&
+      ((f.leituraAtual || 0) > 0 || (f.leituraAnterior || 0) > 0))
+    .sort((a, b) => a.dataPagamento.localeCompare(b.dataPagamento));
+
+  const body = document.getElementById('energia-hist-body');
+  if (!registros.length) {
+    body.innerHTML = '<p style="color:var(--gray-400);text-align:center;padding:32px">Nenhuma leitura de energia registrada para este inquilino.</p>';
+  } else {
+    const totalKwh  = registros.reduce((s, r) => s + Math.max(0, (r.leituraAtual||0) - (r.leituraAnterior||0)), 0);
+    const totalVal  = registros.reduce((s, r) => s + (r.totalEnergia || 0), 0);
+    const linhas = registros.map((r, i) => {
+      const consumo = Math.max(0, (r.leituraAtual||0) - (r.leituraAnterior||0));
+      const fmtKwh  = v => v.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+      const bg = i % 2 === 0 ? '#fff' : '#f9fafb';
+      return `<tr style="background:${bg}">
+        <td style="padding:8px 12px">${fmtDate(r.dataPagamento)}</td>
+        <td style="padding:8px 12px;color:var(--gray-500)">${r.contrato}</td>
+        <td style="padding:8px 12px;text-align:right">${fmtKwh(r.leituraAnterior||0)}</td>
+        <td style="padding:8px 12px;text-align:right;font-weight:600">${fmtKwh(r.leituraAtual||0)}</td>
+        <td style="padding:8px 12px;text-align:right;color:${consumo>0?'#2563eb':'#9ca3af'};font-weight:600">${fmtKwh(consumo)}</td>
+        <td style="padding:8px 12px;text-align:right;color:var(--gray-500)">${(r.valorKwh||0).toLocaleString('pt-BR',{minimumFractionDigits:4})}</td>
+        <td style="padding:8px 12px;text-align:right;font-weight:600">${fmt(r.totalEnergia||0)}</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:#f3f4f6;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280">
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #e5e7eb">Vencimento</th>
+          <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #e5e7eb">Contrato</th>
+          <th style="padding:10px 12px;text-align:right;border-bottom:2px solid #e5e7eb">Leit. Anterior</th>
+          <th style="padding:10px 12px;text-align:right;border-bottom:2px solid #e5e7eb">Leit. Atual</th>
+          <th style="padding:10px 12px;text-align:right;border-bottom:2px solid #e5e7eb">Consumo (kWh)</th>
+          <th style="padding:10px 12px;text-align:right;border-bottom:2px solid #e5e7eb">R$/kWh</th>
+          <th style="padding:10px 12px;text-align:right;border-bottom:2px solid #e5e7eb">Total Energia</th>
+        </tr></thead>
+        <tbody>${linhas}</tbody>
+        <tfoot><tr style="background:#eff6ff;font-weight:700;border-top:2px solid #bfdbfe">
+          <td colspan="4" style="padding:10px 12px;color:#1d4ed8">Total Acumulado</td>
+          <td style="padding:10px 12px;text-align:right;color:#1d4ed8">${totalKwh.toLocaleString('pt-BR',{minimumFractionDigits:3})} kWh</td>
+          <td></td>
+          <td style="padding:10px 12px;text-align:right;color:#1d4ed8">${fmt(totalVal)}</td>
+        </tr></tfoot>
+      </table>`;
+  }
+  document.getElementById('modal-energia-hist').classList.add('open');
+}
+
 function _aplicarEnergiaNoForm() {
   const form    = document.getElementById('form-financeiro');
   const cod     = form?.elements['contrato']?.value;
@@ -5634,6 +6120,11 @@ function _aplicarEnergiaNoForm() {
     const kwhEl = form?.elements['valorKwh'];
     if (kwhEl && !parseFloat(kwhEl.value)) kwhEl.value = kwh.toFixed(4);
   }
+
+  // Botão de histórico: visível apenas quando há inquilino selecionado
+  const inqVal  = form?.elements['inquilino']?.value;
+  const btnHist = document.getElementById('btn-energia-hist');
+  if (btnHist) btnHist.style.display = (isSolar && inqVal) ? '' : 'none';
 }
 
 // ── MODAL HELPERS ──────────────────────────────────────
@@ -6513,6 +7004,26 @@ async function _fichaNotificarAcesso() {
 }
 
 async function carregarConfigEmail() {
+  // Migração one-time: empresa 1 sem emailConfig → buscar campos não-secretos do servidor (.env)
+  const emp = _empresaAtual();
+  if (emp && emp.id === 1 && !emp.emailConfig?.user) {
+    try {
+      const r = await fetch('/api/email/config');
+      const srv = await r.json();
+      if (srv.user || srv.host) {
+        _setEmailEmpConfig({
+          host:   srv.host   || 'smtp.gmail.com',
+          port:   srv.port   || 465,
+          secure: srv.secure !== false,
+          user:   srv.user   || '',
+          from:   srv.from   || srv.user || '',
+          appUrl: srv.appUrl || '',
+          // pass não é retornado pelo servidor por segurança — admin deverá re-inserir uma vez
+        });
+      }
+    } catch(e) {}
+  }
+
   const ec  = _emailEmpConfig();
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
   set('email-host',   ec.host   || 'smtp.gmail.com');
