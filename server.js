@@ -117,6 +117,23 @@ const emailTemplates = {
       </div>`,
   }),
 
+  esqueceuSenha: ({ nome, usuario, senha, appUrl }) => ({
+    subject: '🔑 Recuperação de acesso — Sistema de Imóveis',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:32px;background:#f9fafb;border-radius:12px">
+        <h2 style="color:#1a56db;margin-bottom:4px">Olá, ${nome}!</h2>
+        <p style="color:#6b7280;margin-top:0">Recebemos uma solicitação de recuperação de acesso para o seu e-mail.</p>
+        <div style="background:#fff;border-radius:10px;padding:24px;margin:24px 0;border:1px solid #e5e7eb">
+          <p style="margin:0 0 12px;font-size:14px;color:#374151"><strong>🔗 Link de acesso:</strong><br>
+            <a href="${appUrl}" style="color:#1a56db">${appUrl}</a>
+          </p>
+          <p style="margin:0 0 12px;font-size:14px;color:#374151"><strong>👤 Usuário:</strong> ${usuario}</p>
+          <p style="margin:0;font-size:14px;color:#374151"><strong>🔑 Senha:</strong> ${senha}</p>
+        </div>
+        <p style="font-size:12px;color:#9ca3af">Se você não solicitou esta recuperação, ignore este e-mail.</p>
+      </div>`,
+  }),
+
   vistoria: ({ nome, imovel, appUrl }) => ({
     subject: '📋 Vistoria disponível para assinatura',
     html: `
@@ -453,6 +470,50 @@ app.post('/api/email/send', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Recuperação de senha ────────────────────────────────
+app.post('/api/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ ok: false, error: 'E-mail não informado' });
+
+  try {
+    // Lê o banco de dados atual
+    let usuarios = [];
+    const col = await getCol();
+    if (col) {
+      const doc = await col.findOne({ _id: 'main' });
+      if (doc?.usuarios) usuarios = doc.usuarios;
+    } else {
+      try {
+        const raw = fs.readFileSync(DB_FILE, 'utf8');
+        usuarios = JSON.parse(raw)?.usuarios || [];
+      } catch { usuarios = []; }
+    }
+
+    const u = usuarios.find(x =>
+      x.email && x.email.toLowerCase() === email.toLowerCase() && x.ativo
+    );
+
+    if (!u) {
+      // Retorna ok para não revelar se o e-mail existe (segurança)
+      return res.json({ ok: true });
+    }
+
+    const { subject, html } = emailTemplates.esqueceuSenha({
+      nome:    u.nome,
+      usuario: u.usuario,
+      senha:   u.senha,
+      appUrl:  emailCfg.appUrl,
+    });
+
+    await enviarEmail({ to: u.email, subject, html });
+    console.log(`[Email] Recuperação de senha enviada para ${u.email}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[forgot-password]', err.message);
+    res.status(500).json({ ok: false, error: 'Falha ao enviar e-mail. Verifique a configuração de e-mail no sistema.' });
   }
 });
 

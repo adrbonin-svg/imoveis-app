@@ -608,6 +608,48 @@ function toggleUserDropdown() {
   document.getElementById('topbar-user-dropdown').classList.toggle('open');
 }
 
+// ── ESQUECI A SENHA ────────────────────────────────────
+function mostrarEsqueceuSenha(e) {
+  e.preventDefault();
+  document.querySelector('.login-card form').style.display = 'none';
+  document.getElementById('painel-esqueceu').style.display = 'block';
+  document.getElementById('forgot-email').focus();
+}
+
+function voltarLogin(e) {
+  e.preventDefault();
+  document.getElementById('painel-esqueceu').style.display = 'none';
+  document.querySelector('.login-card form').style.display = 'block';
+  document.getElementById('forgot-msg').textContent = '';
+  document.getElementById('forgot-email').value = '';
+}
+
+async function enviarSenhaEmail() {
+  const email = document.getElementById('forgot-email').value.trim().toLowerCase();
+  const msgEl = document.getElementById('forgot-msg');
+  msgEl.style.color = '';
+  if (!email) { msgEl.style.color = 'var(--danger)'; msgEl.textContent = 'Digite seu e-mail.'; return; }
+  msgEl.textContent = 'Enviando...';
+  try {
+    const res = await fetch('/api/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      msgEl.style.color = 'var(--success)';
+      msgEl.textContent = 'E-mail enviado! Verifique sua caixa de entrada.';
+    } else {
+      msgEl.style.color = 'var(--danger)';
+      msgEl.textContent = data.error || 'Erro ao enviar. Tente novamente.';
+    }
+  } catch {
+    msgEl.style.color = 'var(--danger)';
+    msgEl.textContent = 'Erro de conexão. Tente novamente.';
+  }
+}
+
 // ── SIDEBAR MOBILE ─────────────────────────────────────
 function toggleSidebar() {
   const sb = document.getElementById('sidebar-el');
@@ -4239,6 +4281,7 @@ function openUsuario(id = null) {
     const u = DB.usuarios.find(x => x.id === id);
     if (!u) return;
     form.elements['nome'].value    = u.nome;
+    form.elements['email'].value   = u.email || '';
     form.elements['usuario'].value = u.usuario;
     form.elements['perfil'].value  = u.perfil;
     form.elements['ativo'].value   = u.ativo ? '1' : '0';
@@ -4281,6 +4324,7 @@ function saveUsuario() {
   const form = document.getElementById('form-usuario');
   const id   = form.dataset.id ? parseInt(form.dataset.id) : null;
   const nome    = form.elements['nome'].value.trim();
+  const email   = form.elements['email'].value.trim().toLowerCase();
   const usuario = form.elements['usuario'].value.trim().toLowerCase();
   const senha   = form.elements['senha'].value;
   const senha2  = form.elements['senhaConfirm'].value;
@@ -4288,6 +4332,7 @@ function saveUsuario() {
   const ativo   = form.elements['ativo'].value === '1';
 
   if (!nome)    { _fieldError('usr-campo-nome',    'Nome é obrigatório'); return; }
+  if (!email)   { _fieldError('usr-campo-email',   'E-mail é obrigatório'); return; }
   if (!usuario) { _fieldError('usr-campo-usuario', 'Usuário é obrigatório'); return; }
 
   const dup = DB.usuarios.find(u => u.usuario.toLowerCase() === usuario && u.id !== id);
@@ -4322,12 +4367,12 @@ function saveUsuario() {
 
   if (id) {
     const idx = DB.usuarios.findIndex(u => u.id === id);
-    const upd = { nome, usuario, perfil, permissoes, ativo };
+    const upd = { nome, email, usuario, perfil, permissoes, ativo };
     if (senha) upd.senha = senha;
     DB.usuarios[idx] = { ...DB.usuarios[idx], ...upd };
     if (_currentUser?.id === id) { _currentUser = DB.usuarios[idx]; _mostrarApp(); }
   } else {
-    DB.usuarios.push({ id: nextId(DB.usuarios), empresaId: _currentEmpresaId(), nome, usuario, senha, perfil, permissoes, ativo });
+    DB.usuarios.push({ id: nextId(DB.usuarios), empresaId: _currentEmpresaId(), nome, email, usuario, senha, perfil, permissoes, ativo });
   }
   saveData();
   closeModal('modal-usuario');
@@ -6668,6 +6713,7 @@ function openEmpUserForm(userId) {
   document.getElementById('emp-user-form-title').textContent = u ? 'Editar Usuário' : 'Novo Usuário';
   if (u) {
     form.elements['nome'].value    = u.nome    || '';
+    form.elements['email'].value   = u.email   || '';
     form.elements['usuario'].value = u.usuario || '';
     form.elements['perfil'].value  = u.perfil  || 'admin';
     form.elements['ativo'].checked = u.ativo !== false;
@@ -6680,23 +6726,24 @@ function saveEmpUser() {
   const id     = form.dataset.id     ? parseInt(form.dataset.id)     : null;
   const empId  = form.dataset.empId  ? parseInt(form.dataset.empId)  : null;
   const nome   = form.elements['nome'].value.trim();
+  const email  = form.elements['email'].value.trim().toLowerCase();
   const usuario = form.elements['usuario'].value.trim();
   const senha  = form.elements['senha'].value.trim();
   const perfil = form.elements['perfil'].value;
   const ativo  = form.elements['ativo'].checked;
   if (!nome || !usuario) { toast('Nome e usuário são obrigatórios', 'error'); return; }
+  if (!email) { toast('E-mail é obrigatório', 'error'); return; }
   if (!id && !senha) { toast('Senha é obrigatória para novo usuário', 'error'); return; }
-  // Verificar usuário duplicado
   const dup = DB.usuarios.find(u => u.usuario.toLowerCase() === usuario.toLowerCase() && u.id !== id);
   if (dup) { toast('Este nome de usuário já existe', 'error'); return; }
   if (id) {
     const idx = DB.usuarios.findIndex(x => x.id === id);
-    DB.usuarios[idx] = { ...DB.usuarios[idx], nome, usuario, perfil, ativo,
+    DB.usuarios[idx] = { ...DB.usuarios[idx], nome, email, usuario, perfil, ativo,
       ...(senha ? { senha } : {}) };
     toast('Usuário atualizado!', 'success');
   } else {
     DB.usuarios.push({
-      id: nextId(DB.usuarios), nome, usuario, senha, perfil, ativo,
+      id: nextId(DB.usuarios), nome, email, usuario, senha, perfil, ativo,
       empresaId: empId,
       permissoes: perfil === 'admin'
         ? { dashboard:{ver:true}, imoveis:{ver:true,criar:true,editar:true,excluir:true},

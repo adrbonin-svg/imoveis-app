@@ -47,7 +47,27 @@
       </div>
       <div class="login-error" id="login-error"></div>
       <button type="submit" class="btn btn-primary login-btn">Entrar</button>
+      <p style="margin-top:14px;font-size:13px">
+        <a href="#" onclick="mostrarEsqueceuSenha(event)" style="color:var(--primary);text-decoration:none">Esqueci minha senha</a>
+      </p>
     </form>
+
+    <!-- Painel Esqueci a senha -->
+    <div id="painel-esqueceu" style="display:none">
+      <p style="font-size:13px;color:var(--gray-600);margin-bottom:16px">
+        Digite seu e-mail cadastrado e enviaremos seus dados de acesso.
+      </p>
+      <div class="form-group" style="text-align:left;margin-bottom:14px">
+        <label style="font-size:13px;font-weight:600;color:var(--gray-700);display:block;margin-bottom:5px">E-mail</label>
+        <input id="forgot-email" type="email" placeholder="seu@email.com"
+          style="width:100%;padding:10px 14px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:14px;outline:none">
+      </div>
+      <div id="forgot-msg" style="font-size:13px;min-height:20px;margin-bottom:8px"></div>
+      <button class="btn btn-primary login-btn" onclick="enviarSenhaEmail()">Enviar dados de acesso</button>
+      <p style="margin-top:14px;font-size:13px">
+        <a href="#" onclick="voltarLogin(event)" style="color:var(--primary);text-decoration:none">← Voltar ao login</a>
+      </p>
+    </div>
   </div>
 </div>
 
@@ -1884,6 +1904,10 @@
             <label>Nome Completo *</label>
             <input name="nome" type="text" id="usr-campo-nome" placeholder="Ex: João da Silva">
           </div>
+          <div class="form-group form-col-2">
+            <label>E-mail *</label>
+            <input name="email" type="email" id="usr-campo-email" placeholder="Ex: joao@email.com">
+          </div>
           <div class="form-group">
             <label>Usuário (login) *</label>
             <input name="usuario" type="text" id="usr-campo-usuario" autocomplete="off" placeholder="Ex: joao.silva">
@@ -2492,6 +2516,10 @@
               <input name="nome" type="text" placeholder="Nome do usuário">
             </div>
             <div class="form-group">
+              <label>E-mail *</label>
+              <input name="email" type="email" placeholder="email@empresa.com">
+            </div>
+            <div class="form-group">
               <label>Usuário (login) *</label>
               <input name="usuario" type="text" placeholder="login sem espaços">
             </div>
@@ -2548,7 +2576,7 @@
     });
   }
   await loadScript('js/data.js?v=12');
-  await loadScript('js/app.js?v=24');
+  await loadScript('js/app.js?v=25');
   const el = document.getElementById('topbar-date');
   if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 })();
