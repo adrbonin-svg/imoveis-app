@@ -472,19 +472,18 @@ function _applyParsedData(parsed, persistLocalStorage) {
     });
   }
 
-  // Criar supermaster se não existir
-  if (!DB.usuarios.find(u => u.perfil === 'supermaster')) {
+  // Garantir que supermaster existe e está ativo com credenciais válidas
+  const smExistente = DB.usuarios.find(u => u.perfil === 'supermaster');
+  if (!smExistente) {
     const smId = DB.usuarios.length > 0 ? Math.max(...DB.usuarios.map(x => x.id)) + 1 : 1;
     DB.usuarios.push({
-      id: smId,
-      nome: 'Super Master',
-      usuario: 'master',
-      senha: 'Master@2026',
-      perfil: 'supermaster',
-      empresaId: null,
-      permissoes: {},
-      ativo: true,
+      id: smId, nome: 'Super Master', usuario: 'master', senha: 'Master@2026',
+      perfil: 'supermaster', empresaId: null, permissoes: {}, ativo: true,
     });
+  } else {
+    smExistente.ativo = true;
+    if (!smExistente.usuario) smExistente.usuario = 'master';
+    if (!smExistente.senha)   smExistente.senha   = 'Master@2026';
   }
 
   if (persistLocalStorage) {
