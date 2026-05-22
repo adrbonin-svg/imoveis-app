@@ -653,19 +653,25 @@ function gerarNotificacoes() {
   let novas = 0;
 
   // 1. Cobranças pendentes / em atraso
+  // Helper local: mesma lógica do dashboard — pago = baixaManual OU Asaas confirmado
+  const _notifFinPago = f => f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
   _myData(DB.financeiro).forEach(f => {
-    if (f.status === 'pago' || !f.vencimento) return;
-    const venc = new Date(f.vencimento + 'T12:00:00'); venc.setHours(0, 0, 0, 0);
+    // Usa dataPagamento (campo real do registro) — "vencimento" não existe nos registros
+    if (!f.dataPagamento || f.tipo === 'caucao') return;
+    if (_notifFinPago(f)) return;
+    if ((f.totalGeral || f.valorContrato || 0) <= 0) return;
+    const venc = new Date(f.dataPagamento + 'T12:00:00'); venc.setHours(0, 0, 0, 0);
     if (venc > hoje) return;
     if (jaExiste('cobranca', f.id)) return;
     const dias = Math.round((hoje - venc) / 86400000);
+    const valorExib = (f.totalGeral || f.valorContrato || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
     DB.notificacoes.push({
       id: _notifNextId(),
       tipo: 'cobranca',
       icone: '💰',
       bgCor: '#fee2e2',
       titulo: dias > 0 ? `Cobrança em atraso — ${dias} dia(s)` : 'Cobrança vence hoje',
-      descricao: `${f.inquilino || 'Inquilino'} — R$ ${(f.totalGeral || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+      descricao: `${f.inquilino || 'Inquilino'} — R$ ${valorExib}`,
       lido: false,
       criadoEm: new Date().toISOString(),
       empresaId: empId,
@@ -949,8 +955,12 @@ function renderDashboard() {
   const anoAtual = now.getFullYear();
   const todayStr = today();
 
-  // Mesma lógica da aba Financeira: pago = baixaManual OU asaas confirmado
-  const _finPago = f => f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
+  // Mesma lógica da aba Financeira: pago = baixaManual COM valor integral OU Asaas confirmado
+  // Pagamento parcial (baixaManual + valorRecebido < totalGeral) continua como PENDENTE
+  const _finPago = f =>
+    (f.baixaManual && (f.valorRecebido || 0) >= (f.totalGeral || f.valorContrato || 1))
+    || f.asaasStatus === 'RECEIVED'
+    || f.asaasStatus === 'CONFIRMED';
 
   // Receita recebida no mês atual (só registros pagos do mês)
   const receitaRecebida = _myFinanceiro
@@ -968,7 +978,8 @@ function renderDashboard() {
   const pgtoVencidos = _myFinanceiro.filter(f => {
     if (f.tipo === 'caucao') return false;
     if (_finPago(f)) return false;
-    if ((f.totalGeral || 0) <= 0) return false;
+    // Aceita totalGeral OU valorContrato para não ignorar registros antigos sem totalGeral
+    if ((f.totalGeral || f.valorContrato || 0) <= 0) return false;
     return f.dataPagamento < todayStr;
   });
 
@@ -2891,6 +2902,7 @@ function gerarParcelasContrato(c) {
 
     DB.financeiro.push({
       id:              nextId(DB.financeiro),
+      empresaId:       c.empresaId || _currentEmpresaId(),
       dataPagamento:   dataVenc,
       contrato:        c.codigo,
       inquilino:       c.inquilino || '',
@@ -2937,6 +2949,7 @@ function gerarCaucaoContrato(c) {
 
     DB.financeiro.push({
       id:              nextId(DB.financeiro),
+      empresaId:       c.empresaId || _currentEmpresaId(),
       tipo:            'caucao',
       dataPagamento:   dataVenc,
       contrato:        c.codigo,
