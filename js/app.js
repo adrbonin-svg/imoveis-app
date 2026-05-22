@@ -591,13 +591,11 @@ function _mostrarApp() {
     if (el) el.style.display = _podeAcao(page, 'criar') ? '' : 'none';
   });
 
-  // Aplica logo da empresa
+  // Aplica logo da empresa somente no sidebar (login tem logo fixa da AutoPrime)
   const _emp = _empresaAtual();
   const _logoSrc = _emp?.logo || 'img/autotrack.png';
   const _sidebarLogo = document.getElementById('sidebar-logo-img');
-  const _loginLogo   = document.getElementById('login-logo-img');
   if (_sidebarLogo) _sidebarLogo.src = _logoSrc;
-  if (_loginLogo)   _loginLogo.src   = _logoSrc;
   const _nomeEl = document.getElementById('sidebar-empresa-nome');
   if (_nomeEl && _emp?.nome) _nomeEl.textContent = _emp.nome;
 

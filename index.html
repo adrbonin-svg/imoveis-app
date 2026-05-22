@@ -33,7 +33,7 @@
 <div id="login-overlay" class="login-overlay hidden">
   <div class="login-card">
     <div class="login-logo">
-      <img id="login-logo-img" src="img/autotrack.png" alt="Logo" style="width:140px;margin-bottom:8px;">
+      <img src="img/autoprimetech.png" alt="AutoPrime Tech" style="width:180px;margin-bottom:8px;">
     </div>
     <p>Faça login para continuar</p>
     <form onsubmit="event.preventDefault(); doLogin()">
@@ -2548,7 +2548,7 @@
     });
   }
   await loadScript('js/data.js?v=12');
-  await loadScript('js/app.js?v=23');
+  await loadScript('js/app.js?v=24');
   const el = document.getElementById('topbar-date');
   if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 })();
