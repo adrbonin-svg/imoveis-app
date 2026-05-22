@@ -4241,14 +4241,15 @@ function _toggleInquilinoAcesso(userId) {
   toast(u.ativo ? 'Acesso do inquilino ativado' : 'Acesso do inquilino desativado');
 }
 
-function _buildPermTable(permissoes) {
+function _buildPermTable(permissoes, paginas) {
   // permissoes: objeto {page: {ver, criar, editar, excluir}} ou array legado
   const perm = (Array.isArray(permissoes) || !permissoes) ? {} : permissoes;
+  const lista = paginas || PAGINAS_PERM;
   const acoesHeader = `<th style="width:60px;text-align:center">Ver</th>
     <th style="width:60px;text-align:center">Criar</th>
     <th style="width:60px;text-align:center">Editar</th>
     <th style="width:70px;text-align:center">Excluir</th>`;
-  const rows = PAGINAS_PERM.map(pg => {
+  const rows = lista.map(pg => {
     const pgPerm = perm[pg.id] || {};
     const verChecked = pgPerm.ver ? 'checked' : '';
     const cells = ['criar','editar','excluir'].map(a => {
@@ -4318,18 +4319,32 @@ function usrTogglePerfil(sel) {
   const perfil = sel.value;
   const isAdmin     = perfil === 'admin';
   const isInquilino = perfil === 'inquilino';
+  const isUsuario   = !isAdmin && !isInquilino;
   document.getElementById('usr-perm-section').style.display      = (isAdmin || isInquilino) ? 'none' : '';
   document.getElementById('usr-inquilino-section').style.display = isInquilino ? '' : 'none';
 
+  if (isUsuario) {
+    // Para perfil Usuário: exibe apenas o módulo Inquilinos nas permissões
+    const form   = document.getElementById('form-usuario');
+    const editId = form.dataset.id ? parseInt(form.dataset.id) : null;
+    let perm = {};
+    if (editId) {
+      const u = DB.usuarios.find(x => x.id === editId);
+      if (u && !Array.isArray(u.permissoes)) perm = u.permissoes || {};
+    }
+    const paginas = PAGINAS_PERM.filter(p => p.id === 'inquilinos');
+    document.getElementById('usr-perm-grid').innerHTML = _buildPermTable(perm, paginas);
+  }
+
   if (isInquilino) {
     // Preenche select de inquilinos disponíveis (sem usuário já vinculado)
-    const sel = document.getElementById('usr-campo-inquilinoId');
+    const selEl  = document.getElementById('usr-campo-inquilinoId');
     const editId = parseInt(document.getElementById('form-usuario').dataset.id) || null;
     const jaVinculados = DB.usuarios
       .filter(u => u.perfil === 'inquilino' && u.inquilinoId && u.id !== editId)
       .map(u => u.inquilinoId);
     const lista = _myData(DB.inquilinos).filter(i => i.ativo !== false && !jaVinculados.includes(i.id));
-    sel.innerHTML = '<option value="">— selecione o inquilino —</option>' +
+    selEl.innerHTML = '<option value="">— selecione o inquilino —</option>' +
       lista.map(i => `<option value="${i.id}">${i.nome}</option>`).join('');
   }
 }
