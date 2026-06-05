@@ -7,7 +7,7 @@
   <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sistema de Gestão de Imóveis</title>
-  <link rel="stylesheet" href="css/style.css?v=2">
+  <link rel="stylesheet" href="css/style.css?v=8">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -108,17 +108,40 @@
         <span class="topbar-sub" id="topbar-date"></span>
       </div>
     </div>
-    <div class="topbar-user" id="topbar-user-btn" onclick="toggleUserDropdown()">
-      <div class="topbar-user-avatar" id="topbar-user-avatar">A</div>
-      <div>
-        <div class="topbar-user-name" id="topbar-user-name">Administrador</div>
-        <div class="topbar-user-role" id="topbar-user-role">Administrador</div>
+    <div class="topbar-right">
+      <span class="app-version-badge" id="app-version-badge" title="Versão do sistema">...</span>
+      <button class="btn-tutorial" onclick="openTutorial()">
+        <span class="btn-tutorial-icon">?</span>
+        <span class="btn-tutorial-text">Como usar o sistema</span>
+      </button>
+      <!-- Sino de notificações -->
+      <div class="notif-wrapper">
+        <button class="notif-btn" id="notif-btn" onclick="toggleNotificacoes()" title="Notificações">
+          <span class="notif-sino">🔔</span>
+          <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+        </button>
+        <div class="notif-dropdown" id="notif-dropdown">
+          <div class="notif-drop-header">
+            <span>🔔 Notificações</span>
+            <span id="notif-nao-lidas-txt" style="font-size:11px;color:#dc2626;font-weight:700"></span>
+          </div>
+          <div class="notif-lista" id="notif-lista">
+            <div class="notif-vazia">Sem notificações</div>
+          </div>
+        </div>
       </div>
-      <span style="font-size:11px;color:var(--gray-400)">▾</span>
-      <div class="topbar-user-dropdown" id="topbar-user-dropdown">
-        <a onclick="openAlterarSenha()">🔑 Alterar Senha</a>
-        <hr class="topbar-user-dd-divider">
-        <a class="danger" onclick="logout()">🚪 Sair</a>
+      <div class="topbar-user" id="topbar-user-btn" onclick="toggleUserDropdown()">
+        <div class="topbar-user-avatar" id="topbar-user-avatar">A</div>
+        <div>
+          <div class="topbar-user-name" id="topbar-user-name">Administrador</div>
+          <div class="topbar-user-role" id="topbar-user-role">Administrador</div>
+        </div>
+        <span style="font-size:11px;color:var(--gray-400)">▾</span>
+        <div class="topbar-user-dropdown" id="topbar-user-dropdown">
+          <a onclick="openAlterarSenha()">🔑 Alterar Senha</a>
+          <hr class="topbar-user-dd-divider">
+          <a class="danger" onclick="logout()">🚪 Sair</a>
+        </div>
       </div>
     </div>
   </div>
@@ -451,6 +474,7 @@
           <h3>Controle de Pagamentos</h3>
           <div style="display:flex;gap:8px;align-items:center">
             <input class="search-box" id="fin-search" placeholder="Buscar contrato / inquilino..." oninput="renderFinanceiro()">
+            <button class="btn btn-sync-red btn-sm" id="btn-sync-asaas" onclick="sincronizarStatusPagamentos()" title="Sincronizar status de pagamentos com o Asaas" style="display:none">🔄 Sincronizar</button>
             <button class="btn btn-primary" id="btn-criar-financeiro" onclick="openFinanceiro()">+ Registrar Pagamento</button>
           </div>
         </div>
@@ -879,6 +903,38 @@
           </div>
         </div>
 
+        <!-- ALERTAS AUTOMÁTICOS -->
+        <div id="config-alertas-section" style="margin-top:48px;padding-top:32px;border-top:2px solid var(--gray-100)">
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">🔔 Alertas Automáticos por E-mail</h3>
+          <p style="font-size:13px;color:var(--gray-400);margin-bottom:16px">Todo dia às <strong>08h00</strong> o sistema envia automaticamente um e-mail de relatório para todos os usuários da empresa que possuem e-mail cadastrado.</p>
+          <div class="card" style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;flex-wrap:wrap;gap:12px">
+              <div style="flex:1;min-width:180px;background:#fee2e2;border-radius:8px;padding:12px 16px">
+                <div style="font-size:18px;margin-bottom:4px">💰</div>
+                <div style="font-size:13px;font-weight:700;color:#b91c1c">Cobranças Pendentes</div>
+                <div style="font-size:12px;color:#991b1b;margin-top:2px">Boletos vencidos ou com vencimento no dia</div>
+              </div>
+              <div style="flex:1;min-width:180px;background:#fef9c3;border-radius:8px;padding:12px 16px">
+                <div style="font-size:18px;margin-bottom:4px">📄</div>
+                <div style="font-size:13px;font-weight:700;color:#92400e">Contratos Vencendo</div>
+                <div style="font-size:12px;color:#78350f;margin-top:2px">Contratos com término nos próximos 30 dias</div>
+              </div>
+              <div style="flex:1;min-width:180px;background:#dbeafe;border-radius:8px;padding:12px 16px">
+                <div style="font-size:18px;margin-bottom:4px">🔧</div>
+                <div style="font-size:13px;font-weight:700;color:#1e40af">Manutenção Preventiva</div>
+                <div style="font-size:12px;color:#1e3a8a;margin-top:2px">Tarefas preventivas com alerta nos próximos 7 dias</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--gray-100)">
+              <div style="flex:1;font-size:12px;color:var(--gray-400)">
+                Para receber os alertas, o usuário precisa ter <strong>e-mail cadastrado</strong> e o <strong>e-mail SMTP configurado</strong> nesta empresa.
+              </div>
+              <button class="btn btn-primary" onclick="testarAlertas()">📤 Enviar Relatório Agora</button>
+              <span id="alertas-status" style="font-size:12px;color:var(--gray-400)"></span>
+            </div>
+          </div>
+        </div>
+
         <!-- BACKUP E RECUPERAÇÃO -->
         <div id="config-backup-section" style="margin-top:48px;padding-top:32px;border-top:2px solid var(--gray-100)">
           <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">🗄️ Backup e Recuperação de Dados</h3>
@@ -1021,6 +1077,467 @@
     <div id="portal-tab-bl" class="portal-tab-content">
       <div id="portal-bl-lista"></div>
     </div>
+  </div>
+</div>
+
+<!-- ══ MODAL TUTORIAL ══ -->
+<div class="modal-overlay" id="modal-tutorial">
+  <div class="modal modal-tutorial">
+    <div class="modal-head">
+      <h3>📚 Tutorial — Como usar o sistema</h3>
+      <button class="modal-close" onclick="closeTutorial()">✕</button>
+    </div>
+    <div class="tut-layout">
+
+      <!-- Sidebar de navegação -->
+      <nav class="tut-sidebar" id="tut-sidebar">
+        <div class="tut-nav-item active" data-tut="dashboard" onclick="showTutSection('dashboard')">
+          <span class="tut-nav-icon">📊</span>
+          <span class="tut-nav-label">Dashboard</span>
+        </div>
+        <div class="tut-nav-item" data-tut="imoveis" onclick="showTutSection('imoveis')">
+          <span class="tut-nav-icon">🏠</span>
+          <span class="tut-nav-label">Imóveis</span>
+        </div>
+        <div class="tut-nav-item" data-tut="inquilinos" onclick="showTutSection('inquilinos')">
+          <span class="tut-nav-icon">👤</span>
+          <span class="tut-nav-label">Inquilinos</span>
+        </div>
+        <div class="tut-nav-item" data-tut="contratos" onclick="showTutSection('contratos')">
+          <span class="tut-nav-icon">📄</span>
+          <span class="tut-nav-label">Contratos</span>
+        </div>
+        <div class="tut-nav-item" data-tut="financeiro" onclick="showTutSection('financeiro')">
+          <span class="tut-nav-icon">💰</span>
+          <span class="tut-nav-label">Financeiro</span>
+        </div>
+        <div class="tut-nav-item" data-tut="manutencao" onclick="showTutSection('manutencao')">
+          <span class="tut-nav-icon">🔧</span>
+          <span class="tut-nav-label">Manutenção</span>
+        </div>
+        <div class="tut-nav-item" data-tut="relatorios" onclick="showTutSection('relatorios')">
+          <span class="tut-nav-icon">📊</span>
+          <span class="tut-nav-label">Relatórios</span>
+        </div>
+        <div class="tut-nav-item" data-tut="usuarios" onclick="showTutSection('usuarios')">
+          <span class="tut-nav-icon">👥</span>
+          <span class="tut-nav-label">Usuários</span>
+        </div>
+        <div class="tut-nav-item" data-tut="config" onclick="showTutSection('config')">
+          <span class="tut-nav-icon">⚙️</span>
+          <span class="tut-nav-label">Configurações</span>
+        </div>
+        <div class="tut-nav-item" data-tut="portal" onclick="showTutSection('portal')">
+          <span class="tut-nav-icon">🏡</span>
+          <span class="tut-nav-label">Portal Inquilino</span>
+        </div>
+      </nav>
+
+      <!-- Conteúdo -->
+      <div class="tut-content">
+
+        <!-- DASHBOARD -->
+        <div class="tut-section active" id="tut-dashboard">
+          <div class="tut-header">
+            <div class="tut-header-icon">📊</div>
+            <h2>Dashboard</h2>
+            <p>Visão geral do sistema em tempo real. Aqui você acompanha os principais indicadores da sua carteira de imóveis sem precisar abrir outras telas.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Cards de resumo</div>
+                <div class="tut-step-desc">Os 4 cards no topo mostram: total de imóveis, inquilinos ativos, cobranças pendentes e receita do mês. Clique em qualquer card para ir direto ao módulo correspondente.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Vencimentos próximos</div>
+                <div class="tut-step-desc">A lista de cobranças mostra todos os boletos com vencimento nos próximos 7 dias. <span class="tut-badge tut-badge-red">Vencida</span> indica atraso, <span class="tut-badge tut-badge-yellow">Hoje</span> indica vencimento no dia.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Contratos a renovar</div>
+                <div class="tut-step-desc">Exibe contratos com menos de 60 dias para o término. Use para planejar a renovação ou encerramento sem surpresas.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Menu lateral</div>
+                <div class="tut-step-desc">Clique em qualquer item no menu esquerdo para navegar entre os módulos. No celular use o ☰ botão no topo para abrir/fechar o menu.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>O Dashboard é atualizado em tempo real toda vez que você salva ou altera um dado no sistema.</div>
+        </div>
+
+        <!-- IMÓVEIS -->
+        <div class="tut-section" id="tut-imoveis">
+          <div class="tut-header">
+            <div class="tut-header-icon">🏠</div>
+            <h2>Imóveis</h2>
+            <p>Cadastre e gerencie todos os imóveis da sua carteira — apartamentos, casas, salas comerciais, terrenos. Cada imóvel é vinculado a contratos e cobranças.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Cadastrar novo imóvel</div>
+                <div class="tut-step-desc">Clique em <strong>+ Novo Imóvel</strong> e preencha: nome/identificação, endereço completo, tipo, valor de aluguel e status (disponível, alugado, manutenção).</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Fotos e documentos</div>
+                <div class="tut-step-desc">Dentro do cadastro do imóvel você pode anexar fotos e documentos (escritura, IPTU, habite-se). Acesse a <strong>Ficha Completa</strong> para ver o histórico completo.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Prédios / Condomínios</div>
+                <div class="tut-step-desc">Use a aba <strong>Prédios</strong> para agrupar imóveis de um mesmo empreendimento. Isso facilita o filtro e a gestão de unidades.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Checklist de vistoria</div>
+                <div class="tut-step-desc">A ficha do imóvel possui um checklist de vistoria de entrada e saída com fotos por cômodo. Use antes de entregar as chaves ao inquilino.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>Imóveis com status <span class="tut-badge tut-badge-green">Disponível</span> aparecem para seleção ao criar um novo contrato.</div>
+        </div>
+
+        <!-- INQUILINOS -->
+        <div class="tut-section" id="tut-inquilinos">
+          <div class="tut-header">
+            <div class="tut-header-icon">👤</div>
+            <h2>Inquilinos</h2>
+            <p>Cadastro completo de pessoas físicas ou jurídicas que alugam seus imóveis. Guarda histórico de contratos, documentos, fiadores e contato.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Cadastrar inquilino</div>
+                <div class="tut-step-desc">Clique em <strong>+ Novo Inquilino</strong>. Preencha nome, CPF, RG, telefone, e-mail e endereço anterior. Esses dados são usados automaticamente em contratos e boletos.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Documentos e fiador</div>
+                <div class="tut-step-desc">Dentro da ficha do inquilino você pode anexar documentos (RG, CPF, comprovante) e cadastrar o fiador com os mesmos dados. Tudo fica vinculado ao cadastro.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Acesso ao Portal</div>
+                <div class="tut-step-desc">Para dar acesso ao inquilino ao Portal do Inquilino, vá em <strong>Usuários</strong>, crie um usuário com perfil <em>Inquilino</em> e vincule ao cadastro do inquilino. O CPF é a senha padrão.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Histórico</div>
+                <div class="tut-step-desc">A ficha completa do inquilino mostra todos os contratos passados e ativos, boletos emitidos, manutenções abertas e comunicações enviadas.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>O campo <strong>WhatsApp</strong> é usado para envio automático de boletos. Certifique-se de cadastrar com DDD, ex: 11999990000.</div>
+        </div>
+
+        <!-- CONTRATOS -->
+        <div class="tut-section" id="tut-contratos">
+          <div class="tut-header">
+            <div class="tut-header-icon">📄</div>
+            <h2>Contratos</h2>
+            <p>Gestão de todas as locações ativas, encerradas ou em negociação. Gere o contrato em PDF, controle renovações e reajustes automaticamente.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Criar contrato</div>
+                <div class="tut-step-desc">Clique em <strong>+ Novo Contrato</strong>. Selecione o imóvel e o inquilino já cadastrados, defina prazo, valor, dia de vencimento e caução. O sistema preenche automaticamente o modelo.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Gerar PDF do contrato</div>
+                <div class="tut-step-desc">Abra o contrato e clique em <strong>Imprimir / Gerar PDF</strong>. O sistema usa o modelo configurado em <em>Configurações → Modelo de Contrato</em> com todas as variáveis preenchidas.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Encerrar contrato</div>
+                <div class="tut-step-desc">Acesse o contrato e use o botão <strong>Encerrar</strong>. Isso libera o imóvel para novas locações e registra o histórico no cadastro do inquilino.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Reajuste de aluguel</div>
+                <div class="tut-step-desc">No contrato ativo use a opção de reajuste para atualizar o valor pelo IGPM, IPCA ou percentual customizado. O histórico de reajustes fica salvo na ficha.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>Contratos com menos de 60 dias para o término aparecem em destaque no Dashboard para facilitar a renovação antecipada.</div>
+        </div>
+
+        <!-- FINANCEIRO -->
+        <div class="tut-section" id="tut-financeiro">
+          <div class="tut-header">
+            <div class="tut-header-icon">💰</div>
+            <h2>Financeiro</h2>
+            <p>Controle de cobranças, boletos, pagamentos recebidos, multas e mora. Integrado ao Asaas para geração automática de boletos bancários.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Lançar cobrança</div>
+                <div class="tut-step-desc">Clique em <strong>+ Nova Cobrança</strong>. Selecione o contrato/inquilino, mês de referência, valor e data de vencimento. Você pode incluir água, energia, taxas extras e multas.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Gerar boleto (Asaas)</div>
+                <div class="tut-step-desc">Com a integração Asaas configurada, clique em <strong>Gerar Boleto</strong> na cobrança. O sistema cria o boleto bancário registrado e guarda o link PDF automaticamente.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Enviar por WhatsApp ou E-mail</div>
+                <div class="tut-step-desc">Após gerar o boleto, use <strong>Enviar WhatsApp</strong> para abrir o WhatsApp Web com a mensagem pronta, ou <strong>Enviar E-mail</strong> para disparar direto pelo Gmail configurado.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Registrar pagamento manual</div>
+                <div class="tut-step-desc">Para pagamentos em dinheiro, PIX ou transferência, clique em <strong>Registrar Pagamento</strong> na cobrança, informe o valor e a data. O status muda para <span class="tut-badge tut-badge-green">Pago</span>.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>Ative a opção <em>Gerar boleto automaticamente ao salvar cobrança</em> em <em>Configurações → Asaas</em> para acelerar o fluxo mensal.</div>
+        </div>
+
+        <!-- MANUTENÇÃO -->
+        <div class="tut-section" id="tut-manutencao">
+          <div class="tut-header">
+            <div class="tut-header-icon">🔧</div>
+            <h2>Manutenção</h2>
+            <p>Gestão de ordens de serviço corretivas e manutenções preventivas. Registre chamados dos inquilinos, acompanhe o andamento e guarde o histórico por imóvel.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Abrir ordem de serviço</div>
+                <div class="tut-step-desc">Clique em <strong>+ Nova OS</strong>. Selecione o imóvel, descreva o problema, defina a prioridade (<span class="tut-badge tut-badge-red">Alta</span> <span class="tut-badge tut-badge-yellow">Média</span> <span class="tut-badge tut-badge-blue">Baixa</span>) e o responsável.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Acompanhar status</div>
+                <div class="tut-step-desc">Cada OS passa pelos status: <span class="tut-badge tut-badge-yellow">Aberta</span> → <span class="tut-badge tut-badge-blue">Em andamento</span> → <span class="tut-badge tut-badge-green">Concluída</span>. Atualize o status conforme o serviço avança.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Fotos e comprovantes</div>
+                <div class="tut-step-desc">Anexe fotos do problema e da solução diretamente na OS. Isso cria um histórico visual útil para comparação em futuras vistorias.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Manutenção preventiva</div>
+                <div class="tut-step-desc">Na aba <strong>Preventiva</strong> você cadastra tarefas recorrentes (troca de filtros, revisão hidráulica etc.) com periodicidade definida. O sistema avisa quando estiver próximo do prazo.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>Inquilinos com acesso ao Portal podem abrir chamados de manutenção diretamente pela plataforma, sem precisar ligar.</div>
+        </div>
+
+        <!-- RELATÓRIOS -->
+        <div class="tut-section" id="tut-relatorios">
+          <div class="tut-header">
+            <div class="tut-header-icon">📊</div>
+            <h2>Relatórios</h2>
+            <p>Gere relatórios financeiros, de inadimplência, de imóveis vagos e de manutenções. Exporte em PDF ou Excel para enviar a proprietários e contadores.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Relatório financeiro mensal</div>
+                <div class="tut-step-desc">Selecione o período desejado e clique em <strong>Gerar Relatório</strong>. O sistema lista todas as cobranças, pagamentos recebidos, inadimplentes e o saldo do período.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Exportar para Excel</div>
+                <div class="tut-step-desc">Clique em <strong>Exportar Excel</strong> para baixar os dados em planilha (.xlsx). Útil para enviar ao contador ou fazer análises fora do sistema.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Relatório de inadimplência</div>
+                <div class="tut-step-desc">Filtre por status <span class="tut-badge tut-badge-red">Em atraso</span> para ver todos os inquilinos com cobranças vencidas, o valor total em aberto e os dias de atraso.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Imprimir / PDF</div>
+                <div class="tut-step-desc">Use o botão <strong>Imprimir</strong> para gerar um PDF formatado do relatório. O layout é otimizado para impressão e envio por e-mail.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>Os relatórios respeitam o filtro de empresa do usuário logado — cada admin vê apenas os dados da sua própria carteira.</div>
+        </div>
+
+        <!-- USUÁRIOS -->
+        <div class="tut-section" id="tut-usuarios">
+          <div class="tut-header">
+            <div class="tut-header-icon">👥</div>
+            <h2>Usuários</h2>
+            <p>Gerencie quem acessa o sistema, com quais permissões e com qual perfil. Ideal para equipes com assistentes, funcionários e inquilinos com acesso ao portal.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Perfis disponíveis</div>
+                <div class="tut-step-desc"><strong>Administrador</strong> — acesso total à empresa. <strong>Usuário</strong> — acesso configurável por módulo. <strong>Inquilino</strong> — acesso somente ao Portal do Inquilino com os próprios dados.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Criar usuário</div>
+                <div class="tut-step-desc">Clique em <strong>+ Novo Usuário</strong>, defina nome, login, senha e perfil. Para o perfil <em>Usuário</em>, configure na tabela de permissões quais módulos e ações ele pode acessar.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Vincular inquilino</div>
+                <div class="tut-step-desc">Para usuários com perfil <em>Inquilino</em>, selecione o cadastro correspondente no campo <strong>Inquilino vinculado</strong>. Isso dá acesso ao Portal com os dados daquele inquilino.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Desativar usuário</div>
+                <div class="tut-step-desc">Para revogar o acesso sem excluir o histórico, desative o usuário pelo toggle <strong>Ativo</strong>. O usuário não consegue mais fazer login mas seus registros são preservados.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>Usuários com perfil <em>Usuário</em> só enxergam as abas para as quais têm permissão. Se não tiver nenhuma permissão marcada, o acesso será negado.</div>
+        </div>
+
+        <!-- CONFIGURAÇÕES -->
+        <div class="tut-section" id="tut-config">
+          <div class="tut-header">
+            <div class="tut-header-icon">⚙️</div>
+            <h2>Configurações</h2>
+            <p>Personalize o sistema com os dados da sua empresa, integração de boletos, e-mail automático, modelo de contrato e muito mais.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Dados da empresa / Locador</div>
+                <div class="tut-step-desc">Preencha nome, CNPJ, endereço e logotipo da empresa. Essas informações aparecem automaticamente nos contratos, boletos e e-mails gerados pelo sistema.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Integração Asaas (boletos)</div>
+                <div class="tut-step-desc">Cole sua chave de API do Asaas, escolha o ambiente (<span class="tut-badge tut-badge-yellow">Sandbox</span> para testes, <span class="tut-badge tut-badge-green">Produção</span> para boletos reais) e clique em <strong>Salvar</strong>. A chave fica salva por empresa.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">E-mail automático (Gmail)</div>
+                <div class="tut-step-desc">Informe seu e-mail Gmail, gere uma <strong>Senha de App</strong> no Google (em Segurança → Verificação em 2 etapas → Senhas de app) e cole no campo Senha. O sistema usa para enviar boletos e avisos.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Modelo de contrato</div>
+                <div class="tut-step-desc">Em <strong>Modelo de Contrato</strong> você edita o texto padrão usando variáveis como <code>{{LOCATARIO_NOME}}</code>, <code>{{IMOVEL_ENDERECO}}</code> e <code>{{CONTRATO_VALOR}}</code>. O sistema substitui automaticamente ao gerar o PDF.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>Cada empresa cadastrada no sistema tem suas próprias configurações de Asaas e e-mail, independentes umas das outras.</div>
+        </div>
+
+        <!-- PORTAL DO INQUILINO -->
+        <div class="tut-section" id="tut-portal">
+          <div class="tut-header">
+            <div class="tut-header-icon">🏡</div>
+            <h2>Portal do Inquilino</h2>
+            <p>Interface exclusiva para o inquilino consultar seus boletos, contrato, histórico de pagamentos e abrir chamados de manutenção — tudo pelo celular ou computador.</p>
+          </div>
+          <ul class="tut-steps">
+            <li class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Como o inquilino acessa</div>
+                <div class="tut-step-desc">O inquilino entra no mesmo endereço do sistema. Ao fazer login com usuário e senha fornecidos pelo administrador, ele é direcionado automaticamente ao Portal.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">O que o inquilino vê</div>
+                <div class="tut-step-desc">Dados do contrato ativo, histórico de cobranças com status de pagamento, link para baixar o boleto em aberto e histórico de manutenções abertas por ele.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Abrir chamado de manutenção</div>
+                <div class="tut-step-desc">O inquilino pode registrar um chamado de manutenção diretamente pelo Portal, descrevendo o problema. O chamado aparece automaticamente no módulo de Manutenção para o administrador.</div>
+              </div>
+            </li>
+            <li class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <div class="tut-step-title">Enviar credenciais</div>
+                <div class="tut-step-desc">Em <strong>Usuários</strong>, após criar o usuário do inquilino, clique em <strong>Enviar Credenciais</strong>. O sistema manda o login e a senha por e-mail ou WhatsApp automaticamente.</div>
+              </div>
+            </li>
+          </ul>
+          <div class="tut-tip"><strong>💡 Dica</strong>A senha padrão do inquilino é o CPF cadastrado (somente números). Recomende que ele troque na primeira entrada clicando em <em>Alterar Senha</em>.</div>
+        </div>
+
+      </div><!-- /tut-content -->
+    </div><!-- /tut-layout -->
   </div>
 </div>
 
@@ -1643,11 +2160,15 @@
 
         <!-- 3. CONSUMO DE ENERGIA -->
         <div id="fin-energia-section">
-          <div class="form-section-label">Consumo de Energia Elétrica <span id="fin-energia-tipo-badge" style="font-size:11px;font-weight:400;color:var(--gray-400);margin-left:6px"></span></div>
+          <div class="form-section-label" style="display:flex;align-items:center;justify-content:space-between">
+            <span>Consumo de Energia Elétrica <span id="fin-energia-tipo-badge" style="font-size:11px;font-weight:400;color:var(--gray-400);margin-left:6px"></span></span>
+            <button type="button" id="btn-energia-hist" class="btn btn-ghost btn-sm" onclick="abrirHistoricoEnergia()" style="display:none;font-size:11px">📋 Histórico de Leituras</button>
+          </div>
           <div class="form-grid">
             <div class="form-group">
               <label>Leitura Anterior do Contador (kWh)</label>
               <input name="leituraAnterior" type="number" step="0.001" min="0" placeholder="0" oninput="calcFinanceiro()">
+              <small id="fin-leitura-ant-info" style="display:none;color:#2563eb;font-size:11px;margin-top:3px"></small>
             </div>
             <div class="form-group">
               <label>Leitura Atual do Contador (kWh)</label>
@@ -2146,13 +2667,30 @@
   </div>
 </div>
 
+<!-- ══ MODAL HISTÓRICO DE ENERGIA ══ -->
+<div class="modal-overlay" id="modal-energia-hist">
+  <div class="modal" style="max-width:780px">
+    <div class="modal-head">
+      <h3>⚡ Histórico de Energia — <span id="energia-hist-nome" style="color:var(--blue-600)"></span></h3>
+      <button class="modal-close" onclick="closeModal('modal-energia-hist')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div id="energia-hist-body" style="overflow-x:auto"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-energia-hist')">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ MODAL PREVIEW CONTRATO ══ -->
 <div class="modal-overlay" id="modal-ct-preview">
   <div class="modal modal-contrato-preview">
     <div class="modal-head">
       <h3 id="preview-ct-title">Contrato Gerado</h3>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn btn-primary btn-sm" onclick="imprimirContrato()">🖨️ Imprimir</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <small style="color:var(--gray-400);font-size:11px;flex-basis:100%;text-align:right">💡 Na janela de impressão → Mais configurações → desmarque <strong>"Cabeçalhos e rodapés"</strong></small>
+        <button class="btn btn-primary btn-sm" onclick="imprimirContrato()">🖨️ Imprimir / Salvar PDF</button>
         <button class="modal-close" onclick="closeModal('modal-ct-preview')">✕</button>
       </div>
     </div>
@@ -2583,10 +3121,12 @@
       document.body.appendChild(s);
     });
   }
-  await loadScript('js/data.js?v=12');
-  await loadScript('js/app.js?v=32');
+  await loadScript('js/data.js?v=14');
+  await loadScript('js/app.js?v=57');
   const el = document.getElementById('topbar-date');
   if (el) el.textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const vbadge = document.getElementById('app-version-badge');
+  if (vbadge && typeof APP_VERSION !== 'undefined') vbadge.textContent = 'v' + APP_VERSION;
 })();
 </script>
 </body>

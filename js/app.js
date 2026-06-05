@@ -1,5 +1,5 @@
 // ── VERSÃO DO SISTEMA ──────────────────────────────────────
-const APP_VERSION = '2026.05.22-v52';
+const APP_VERSION = '2026.05.27-v57';
 // ────────────────────────────────────────────────────────────
 
 // ── MODELO PADRÃO DE CONTRATO (usado por resetModeloContrato) ──────────────
@@ -2782,7 +2782,7 @@ function saveContrato() {
     ajustes: form.ajustes.value.trim(),
     status: form.status.value,
     dataContrato:          form.elements['dataContrato'].value,
-    diaVencimento:         parseInt(form.elements['diaVencimento'].value)    || null,
+    diaVencimento:         Math.min(31, Math.max(1, parseInt(form.elements['diaVencimento'].value) || 10)),
     dataPrimeiraCobranca:  form.elements['dataPrimeiraCobranca'].value       || '',
     coInquilinos:          [..._ctCoInquilinos],
     caucao:                parseFloat(form.elements['caucao'].value)              || 0,
@@ -2879,7 +2879,7 @@ function gerarParcelasContrato(c) {
 
   // Calcula quantas parcelas cabem entre a 1ª cobrança e o término
   const prazo = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth());
-  if (prazo <= 0) return 0;
+  if (prazo <  0) return 0;
 
   // Fator pro-rata da 1ª parcela: dias de dataInicio até dataPrimeiraCobranca (inclusive) / 30
   let fatorPrimeira = 1;
@@ -2888,10 +2888,17 @@ function gerarParcelasContrato(c) {
     const dInicio   = new Date(c.dataInicio          + 'T12:00:00');
     const dPrimeira = new Date(c.dataPrimeiraCobranca + 'T12:00:00');
     diasProRata = Math.round((dPrimeira - dInicio) / 86400000) + 1;
-    fatorPrimeira = _round2(diasProRata / 30);
+    // Pro-rata so se aplicado se a 1a cobranca estiver no MESMO MES da dataInicio
+    // (caso contrario, a 1a parcela cobra valor cheio como as demais)
+    if (diasProRata > 30) {
+      diasProRata = 0;
+      fatorPrimeira = 1;
+    } else {
+      fatorPrimeira = _round2(diasProRata / 30);
+    }
   }
 
-  for (let i = 0; i < prazo; i++) {
+  for (let i = 0; i <= prazo; i++) {
     const totalMeses = d1.getMonth() + i;
     const ano = d1.getFullYear() + Math.floor(totalMeses / 12);
     const mes = totalMeses % 12;
@@ -2983,17 +2990,69 @@ function gerarCaucaoContrato(c) {
   return n;
 }
 
-function deleteContrato(id) {
-  if (!confirm_('Excluir este contrato?')) return;
+async function deleteContrato(id) {
   const ct = DB.contratos.find(x => x.id === id);
-  _auditLog('excluir', 'contrato', id, ct?.codigo || String(id), ct, null);
-  const nomeImovel = ct?.imovel;
+  if (!ct) return;
+
+  // Parcelas PENDENTES (sem pagamento) — vao ser removidas junto
+  // Parcelas PAGAS sao mantidas para historico financeiro
+  const parcelasPendentes = DB.financeiro.filter(f =>
+    f.contrato === ct.codigo && (f.valorRecebido || 0) === 0
+  );
+  const comBoleto = parcelasPendentes.filter(p => p.asaasPaymentId);
+
+  let msg = `Excluir o contrato ${ct.codigo}?`;
+  if (parcelasPendentes.length > 0) {
+    msg += `\n\nIsso tambem vai remover:`;
+    msg += `\n  • ${parcelasPendentes.length} parcela(s) pendente(s) do Financeiro`;
+    if (comBoleto.length > 0) {
+      msg += `\n  • ${comBoleto.length} boleto(s) ASAAS sera(o) cancelado(s)`;
+    }
+    msg += `\n\nParcelas ja pagas serao mantidas no historico.`;
+  }
+  if (!confirm_(msg)) return;
+
+  _auditLog('excluir', 'contrato', id, ct.codigo, ct, null);
+  const nomeImovel = ct.imovel;
+
+  // 1) Cancelar boletos pendentes no Asaas
+  const erros = [];
+  if (comBoleto.length > 0 && _asaasAtivo()) {
+    for (const p of comBoleto) {
+      try {
+        const r = await _asaasCall('DELETE', `/payment/${p.asaasPaymentId}`);
+        if (r && (r.error || r.errors)) {
+          erros.push(`${p.dataPagamento}: ${r.error || JSON.stringify(r.errors)}`);
+        }
+      } catch (e) {
+        erros.push(`${p.dataPagamento}: ${e.message}`);
+      }
+    }
+  }
+
+  // 2) Remover parcelas pendentes do financeiro local (mantem as pagas)
+  DB.financeiro = DB.financeiro.filter(f =>
+    !(f.contrato === ct.codigo && (f.valorRecebido || 0) === 0)
+  );
+
+  // 3) Remover o contrato
   DB.contratos = DB.contratos.filter(x => x.id !== id);
   _syncImovelStatus(nomeImovel);
   saveData();
   renderContratos();
   renderImoveis();
-  toast('Contrato excluído');
+  if (typeof renderFinanceiro === 'function') renderFinanceiro();
+  if (typeof renderDashboard === 'function') renderDashboard();
+
+  let msgFinal = `Contrato ${ct.codigo} excluido.`;
+  if (parcelasPendentes.length > 0) msgFinal += ` ${parcelasPendentes.length} parcela(s) removida(s).`;
+  if (comBoleto.length > 0)         msgFinal += ` ${comBoleto.length - erros.length}/${comBoleto.length} boleto(s) cancelado(s) no Asaas.`;
+  if (erros.length > 0) {
+    console.error('[deleteContrato] Erros ao cancelar boletos:', erros);
+    toast(msgFinal + ` ${erros.length} falha(s) no cancelamento.`, 'warning');
+  } else {
+    toast(msgFinal, 'success');
+  }
 }
 
 function gerarContrato(id) {
@@ -5093,7 +5152,21 @@ async function gerarBoleto(finId) {
     // Referência no topo das instruções
     const _fmt2 = v => Number(v).toFixed(2).replace('.', ',');
     const _nomeLoc = _asaasEmpConfig().nomeBeneficiario || DB.config.locador?.nome || 'Locador';
+
+    // Competência (mês/ano de referência) derivada da data de vencimento
+    const _MESES = ['JANEIRO','FEVEREIRO','MARCO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];
+    let _competencia = '';
+    if (f.dataPagamento) {
+      const [_ano, _mes] = f.dataPagamento.split('-');
+      if (_mes && _ano) _competencia = `${_MESES[parseInt(_mes, 10) - 1]}/${_ano}`;
+    }
+
     linhasInst.push(`Ref.: ${f.contrato} | Inquilino: ${f.inquilino || contrato?.inquilino || ''} | Venc.: ${fmtDate(f.dataPagamento)}`);
+    if (_competencia) {
+      linhasInst.push(`Competencia: ${_competencia}`);
+      linhasObs.push(`Competencia: ${_competencia}`);
+    }
+    linhasInst.push('Discriminacao dos valores cobrados:');
 
     if ((f.valorContrato || 0) > 0) {
       linhasObs.push(`Aluguel: R$ ${_fmt2(f.valorContrato)}`);
@@ -5338,54 +5411,64 @@ async function cancelarBoleto(finId) {
 }
 
 // Sincroniza status de todos os boletos pendentes consultando diretamente o Asaas
-async function sincronizarStatusPagamentos() {
+// Sincroniza status de pagamentos com Asaas
+// Estrategia: busca TODOS RECEIVED+CONFIRMED no Asaas (1-2 chamadas) e mapeia
+// para parcelas locais pelo asaasPaymentId. Resolve race condition onde frontend
+// sobrescreve dados antigos no db.json.
+// param silent: se true, nao mostra toast nem mexe no botao (uso na inicializacao)
+async function sincronizarStatusPagamentos(silent = false) {
   if (!_asaasAtivo() || !_asaasServer()) {
-    toast('Integração Asaas não está ativa', 'error'); return;
+    if (!silent) toast('Integração Asaas não está ativa', 'error');
+    return;
   }
   const btn = document.getElementById('btn-sync-asaas');
   const textoOriginal = btn?.textContent || '🔄 Sincronizar';
-  if (btn) { btn.textContent = '⏳ Sincronizando...'; btn.disabled = true; }
+  if (!silent && btn) { btn.textContent = '⏳ Sincronizando...'; btn.disabled = true; }
 
-  const pendentes = _myData(DB.financeiro).filter(f =>
-    f.asaasPaymentId &&
-    f.asaasStatus !== 'RECEIVED' &&
-    f.asaasStatus !== 'CONFIRMED' &&
-    f.asaasStatus !== 'CANCELED'
-  );
+  const fetchByStatus = async (status) => {
+    let offset = 0; const all = [];
+    while (true) {
+      const r = await _asaasCall('GET', `/payments?status=${status}&limit=100&offset=${offset}`);
+      const data = r.data || [];
+      all.push(...data);
+      if (data.length < 100) break;
+      offset += 100;
+    }
+    return all;
+  };
 
-  if (!pendentes.length) {
-    toast('Nenhum boleto pendente para sincronizar', 'success');
-    if (btn) { btn.textContent = textoOriginal; btn.disabled = false; }
+  let atualizados = 0;
+  try {
+    const pagosAsaas = [...await fetchByStatus('RECEIVED'), ...await fetchByStatus('CONFIRMED')];
+    for (const p of pagosAsaas) {
+      const idx = DB.financeiro.findIndex(f => f.asaasPaymentId === p.id);
+      if (idx < 0) continue;
+      const parc = DB.financeiro[idx];
+      const precisa = (parc.valorRecebido || 0) !== p.value || parc.asaasStatus !== p.status;
+      if (precisa) {
+        parc.asaasStatus    = p.status;
+        parc.valorRecebido  = p.value;
+        parc.dataBaixa      = p.paymentDate || p.confirmedDate || parc.dataPagamento;
+        parc.formaPagamento = parc.formaPagamento || 'Boleto Asaas';
+        atualizados++;
+      }
+    }
+  } catch (e) {
+    console.error('[sync] Erro ao buscar pagamentos:', e);
+    if (!silent) toast('Erro ao sincronizar com Asaas', 'error');
+    if (!silent && btn) { btn.textContent = textoOriginal; btn.disabled = false; }
     return;
   }
 
-  let atualizados = 0;
-  for (const f of pendentes) {
-    try {
-      const res = await _asaasCall('GET', `/payment/${f.asaasPaymentId}`);
-      if (res.ok && res.payment?.status) {
-        const novoStatus = res.payment.status;
-        if (novoStatus !== f.asaasStatus) {
-          const idx = DB.financeiro.findIndex(x => x.id === f.id);
-          if (idx >= 0) {
-            DB.financeiro[idx].asaasStatus = novoStatus;
-            if (novoStatus === 'RECEIVED' || novoStatus === 'CONFIRMED') {
-              DB.financeiro[idx].valorRecebido = res.payment.value || f.totalGeral;
-            }
-            atualizados++;
-          }
-        }
-      }
-    } catch { /* ignora erros individuais */ }
-  }
-
   if (atualizados > 0) {
-    saveData(); renderFinanceiro(); renderDashboard();
-    toast(`✅ ${atualizados} pagamento${atualizados > 1 ? 's' : ''} atualizado${atualizados > 1 ? 's' : ''}!`, 'success');
-  } else {
-    toast('Nenhuma alteração de status encontrada', 'success');
+    saveData();
+    if (typeof renderFinanceiro === 'function') renderFinanceiro();
+    if (typeof renderDashboard === 'function') renderDashboard();
+    if (!silent) toast(`✅ ${atualizados} pagamento${atualizados > 1 ? 's' : ''} atualizado${atualizados > 1 ? 's' : ''}!`, 'success');
+  } else if (!silent) {
+    toast('Tudo sincronizado — nenhuma novidade do Asaas', 'success');
   }
-  if (btn) { btn.textContent = textoOriginal; btn.disabled = false; }
+  if (!silent && btn) { btn.textContent = textoOriginal; btn.disabled = false; }
 }
 
 // Poll webhook events → baixa automática
@@ -7532,6 +7615,16 @@ async function _initApp() {
   _syncAllImoveisStatus();
   initAuth();
   _autoDetectAsaas();
+
+  // Sincronizacao silenciosa com Asaas ao carregar (resolve race conditions
+  // onde frontend sobrescreveu dados ou webhook nao chegou). Apos auth.
+  setTimeout(() => {
+    if (_asaasAtivo()) sincronizarStatusPagamentos(true);
+  }, 5000);
+  // Repete a cada 5 minutos
+  setInterval(() => {
+    if (_asaasAtivo()) sincronizarStatusPagamentos(true);
+  }, 5 * 60 * 1000);
 }
 
 // Funciona tanto com carregamento estático quanto dinâmico de scripts

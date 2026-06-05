@@ -402,6 +402,17 @@ app.get('/api/asaas/payment/:id', async (req, res) => {
   }
 });
 
+// Listagem de pagamentos (com filtros: status, customer, dateCreated[ge], limit, offset)
+app.get('/api/asaas/payments', async (req, res) => {
+  try {
+    const qs = new URLSearchParams(req.query).toString();
+    const data = await asaasRequest('GET', `/payments?${qs}`, null, reqAsaasKey(req), reqAsaasEnv(req));
+    res.json({ ok: true, ...data });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.delete('/api/asaas/payment/:id', async (req, res) => {
   try {
     const data = await asaasRequest('DELETE', `/payments/${req.params.id}`, null, reqAsaasKey(req), reqAsaasEnv(req));
