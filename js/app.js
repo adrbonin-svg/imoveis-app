@@ -6874,6 +6874,40 @@ function _portalRenderContratos(inq) {
     const btnArquivo = arquivo
       ? `<button class="btn btn-primary btn-sm" onclick="viewContratoArquivo(${c.id})">📥 Baixar Contrato</button>`
       : '';
+    // Cobrança vigente do contrato (mês atual; senão a próxima; senão a última) —
+    // os valores aqui batem EXATAMENTE com o boleto gerado.
+    const _cobrs = DB.financeiro
+      .filter(f => f.contrato === c.codigo && f.tipo !== 'caucao')
+      .sort((a, b) => (a.dataPagamento || '').localeCompare(b.dataPagamento || ''));
+    const _hojeP = today();
+    const cobrAtual = _cobrs.find(f => (f.dataPagamento || '').slice(0, 7) === _hojeP.slice(0, 7))
+      || _cobrs.find(f => (f.dataPagamento || '') >= _hojeP)
+      || _cobrs[_cobrs.length - 1] || null;
+
+    let blocoCobranca = '';
+    if (cobrAtual) {
+      const mesRef = cobrAtual.dataPagamento
+        ? new Date(cobrAtual.dataPagamento + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+        : '';
+      const itens = [
+        { label: 'Aluguel',    val: cobrAtual.valorContrato  || 0 },
+        { label: 'Água',       val: cobrAtual.consumoAgua    || 0 },
+        { label: 'Manutenção', val: cobrAtual.taxaManutencao || 0 },
+        { label: 'Energia',    val: cobrAtual.totalEnergia   || 0 },
+        { label: 'Extras',     val: cobrAtual.taxasExtras    || 0 },
+        { label: 'Multa',      val: cobrAtual.valorMulta     || 0 },
+        { label: 'Juros/Mora', val: cobrAtual.valorMora      || 0 },
+      ].filter(x => x.val > 0);
+      blocoCobranca = `
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--gray-200,#e5e7eb)">
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:6px">💰 Cobrança de ${mesRef} <span style="color:var(--gray-400)">(igual ao boleto)</span></div>
+        <div class="portal-grid">
+          ${itens.map(x => `<div><span class="portal-label">${x.label}</span><span>${fmt(x.val)}</span></div>`).join('')}
+          <div><span class="portal-label">Total</span><strong>${fmt(cobrAtual.totalGeral || 0)}</strong></div>
+        </div>
+      </div>`;
+    }
+
     return `
     <div class="portal-card">
       <div class="portal-card-head">
@@ -6886,12 +6920,14 @@ function _portalRenderContratos(inq) {
           ${btnArquivo}
         </div>
       </div>
+      <div style="font-size:12px;color:var(--gray-500);margin-bottom:6px">📄 Condições do contrato <span style="color:var(--gray-400)">(referência)</span></div>
       <div class="portal-grid">
-        <div><span class="portal-label">Valor Mensal</span><strong>${fmt(c.valorMensal)}</strong></div>
+        <div><span class="portal-label">Valor do Aluguel</span><strong>${fmt(c.valorMensal)}</strong></div>
         <div><span class="portal-label">Vencimento</span><strong>Dia ${c.diaVencimento || '—'}</strong></div>
         <div><span class="portal-label">Taxa de Água</span><span>${c.taxaAgua > 0 ? fmt(c.taxaAgua) : '—'}</span></div>
         <div><span class="portal-label">Taxa Manutenção</span><span>${c.taxaManutencao > 0 ? fmt(c.taxaManutencao) : '—'}</span></div>
       </div>
+      ${blocoCobranca}
     </div>`;
   }).join('');
 }
