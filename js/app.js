@@ -2445,14 +2445,80 @@ function preencherValoresImovel(sel) {
   if (imo.taxasExtras    > 0) form.elements['taxasExtras'].value    = imo.taxasExtras;
 }
 
-function updateCaucaoInfo() {
+// Data de vencimento mensal padrão da parcela i (a partir da data base, mesmo dia)
+function _caucaoDataMensal(dataBase, i) {
+  const d1 = new Date((dataBase || today()) + 'T12:00:00');
+  const totalMeses = d1.getMonth() + i;
+  const ano = d1.getFullYear() + Math.floor(totalMeses / 12);
+  const mes = ((totalMeses % 12) + 12) % 12;
+  const ultimoDia = new Date(ano, mes + 1, 0).getDate();
+  const dia = Math.min(d1.getDate(), ultimoDia);
+  return `${ano}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+}
+
+// Monta as linhas editáveis (valor + data) de cada parcela da caução.
+// presetItens (opcional) preenche a partir de um contrato salvo.
+function updateCaucaoInfo(presetItens) {
   const caucao   = parseFloat(document.querySelector('[name="caucao"]')?.value) || 0;
   const parcelas = parseInt(document.getElementById('caucao-parcelas-sel')?.value) || 1;
   const info     = document.getElementById('caucao-parcela-info');
-  if (!info) return;
-  if (parcelas <= 1 || !caucao) { info.textContent = ''; return; }
+  const cont     = document.getElementById('caucao-parcelas-detalhe');
+  if (info) info.textContent = '';
+  if (!cont) return;
+
+  if (parcelas <= 1 || !caucao) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
+  cont.style.display = '';
+
+  const dataBase = document.querySelector('[name="dataInicio"]')?.value || today();
+
+  // Decide a origem dos valores/datas: preset salvo > linhas já digitadas > padrão (igual + mensal)
+  let valores = [], datas = [];
+  const existentes = cont.querySelectorAll('.caucao-parc-row');
+  if (Array.isArray(presetItens) && presetItens.length === parcelas) {
+    presetItens.forEach(p => { valores.push(p.valor); datas.push(p.data); });
+  } else if (existentes.length === parcelas) {
+    existentes.forEach(r => { valores.push(r.querySelector('.cp-valor').value); datas.push(r.querySelector('.cp-data').value); });
+  } else {
+    const vEq = Math.round((caucao / parcelas) * 100) / 100;
+    for (let i = 0; i < parcelas; i++) {
+      valores.push((i === parcelas - 1 ? (caucao - vEq * (parcelas - 1)) : vEq).toFixed(2));
+      datas.push(_caucaoDataMensal(dataBase, i));
+    }
+  }
+
+  let html = '<div style="font-size:12px;color:var(--gray-400);margin-bottom:4px">Valor e vencimento de cada parcela (editáveis):</div>';
+  for (let i = 0; i < parcelas; i++) {
+    html += `<div class="caucao-parc-row" style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--gray-400);min-width:84px">Parcela ${i + 1}/${parcelas}</span>
+      <input class="cp-valor" type="number" step="0.01" min="0" value="${valores[i]}" oninput="_caucaoSoma()" placeholder="Valor R$" style="max-width:130px">
+      <input class="cp-data" type="date" value="${datas[i] || ''}" style="max-width:170px">
+    </div>`;
+  }
+  html += '<div id="caucao-soma-info" style="font-size:12px;margin-top:8px"></div>';
+  cont.innerHTML = html;
+  _caucaoSoma();
+}
+
+// Indicador ao vivo: soma das parcelas vs total da caução
+function _caucaoSoma() {
+  const caucao = parseFloat(document.querySelector('[name="caucao"]')?.value) || 0;
+  let soma = 0;
+  document.querySelectorAll('#caucao-parcelas-detalhe .cp-valor').forEach(r => soma += parseFloat(r.value) || 0);
+  const el = document.getElementById('caucao-soma-info');
+  if (!el) return;
   const fmtBR = v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  info.textContent = `→ ${parcelas}x de ${fmtBR(caucao / parcelas)}`;
+  const ok = Math.abs(soma - caucao) < 0.01;
+  el.innerHTML = `Soma: <strong style="color:${ok ? '#16a34a' : '#dc2626'}">${fmtBR(soma)}</strong> / Total: ${fmtBR(caucao)}`
+    + (ok ? ' ✓' : ' — <span style="color:#dc2626">ajuste para bater com o total</span>');
+}
+
+// Lê as parcelas da caução do formulário → [{ valor, data }]
+function _coletarCaucaoParcelas() {
+  const rows = document.querySelectorAll('#caucao-parcelas-detalhe .caucao-parc-row');
+  return Array.from(rows).map(r => ({
+    valor: parseFloat(r.querySelector('.cp-valor').value) || 0,
+    data:  r.querySelector('.cp-data').value || '',
+  }));
 }
 
 function renderContratos() {
@@ -2670,7 +2736,7 @@ function openContrato(id = null) {
     form.elements['taxaAgua'].value                = c.taxaAgua        || '';
     form.elements['taxaManutencao'].value          = c.taxaManutencao  || '';
     form.elements['taxasExtras'].value             = c.taxasExtras     || '';
-    updateCaucaoInfo();
+    updateCaucaoInfo(c.caucaoParcelasItens);
     updateFileZone(c.arquivo || null);
     // Carrega co-locatários salvos
     _ctCoInquilinos = (c.coInquilinos || []).map(ci => ({ id: ci.id, nome: ci.nome }));
@@ -2678,6 +2744,7 @@ function openContrato(id = null) {
     _ctPopularSelCoInq(parseInt(form.inquilino.value) || null);
   } else {
     updateFileZone(null);
+    updateCaucaoInfo(); // contrato novo: limpa o detalhamento de parcelas
   }
   const ctRecord = id ? DB.contratos.find(x => x.id === id) : null;
   renderCamposExtrasForm('contrato', 'ce-form-contrato', ctRecord);
@@ -2788,6 +2855,7 @@ function saveContrato() {
     caucao:                parseFloat(form.elements['caucao'].value)              || 0,
     caucaoParcelas:         parseInt(form.elements['caucaoParcelas'].value)       || 1,
     caucaoFormaPagamento:  form.elements['caucaoFormaPagamento']?.value           || '',
+    caucaoParcelasItens:   (parseInt(form.elements['caucaoParcelas'].value) || 1) > 1 ? _coletarCaucaoParcelas() : [],
     taxaAgua:        parseFloat(form.elements['taxaAgua'].value)       || 0,
     taxaManutencao:  parseFloat(form.elements['taxaManutencao'].value) || 0,
     taxasExtras:     parseFloat(form.elements['taxasExtras'].value)    || 0,
@@ -2795,6 +2863,16 @@ function saveContrato() {
   };
   if (_contratoArquivoPendente) data.arquivo = _contratoArquivoPendente;
   if (!data.codigo) { toast('Código é obrigatório', 'error'); return; }
+
+  // Valida parcelas da caução: datas preenchidas e soma igual ao total
+  if (data.caucao > 0 && data.caucaoParcelas > 1) {
+    const itens = data.caucaoParcelasItens || [];
+    if (itens.some(p => !p.data)) { toast('Preencha a data de vencimento de todas as parcelas da caução', 'error'); return; }
+    const soma = itens.reduce((s, p) => s + (parseFloat(p.valor) || 0), 0);
+    if (Math.abs(soma - data.caucao) > 0.01) {
+      toast(`Soma das parcelas (${fmt(soma)}) difere do total da caução (${fmt(data.caucao)})`, 'error'); return;
+    }
+  }
   const oldImovel = id ? DB.contratos.find(x => x.id === id)?.imovel : null;
   if (id) {
     const idx = DB.contratos.findIndex(x => x.id === id);
@@ -2819,13 +2897,19 @@ function saveContrato() {
     const novoContrato = DB.contratos[DB.contratos.length - 1];
     qtdParcelas = gerarParcelasContrato(novoContrato);
     qtdCaucao   = gerarCaucaoContrato(novoContrato);
-  } else if ((existing?.caucao || 0) !== data.caucao) {
-    // Caução foi alterada: remove entradas não pagas e regenera
-    DB.financeiro = DB.financeiro.filter(f =>
-      !(f.tipo === 'caucao' && f.contrato === data.codigo && !(f.valorRecebido > 0))
-    );
-    const contratoAtualizado = DB.contratos.find(x => x.id === id);
-    if (contratoAtualizado) qtdCaucao = gerarCaucaoContrato(contratoAtualizado);
+  } else {
+    const caucaoMudou =
+      (existing?.caucao || 0) !== data.caucao ||
+      (existing?.caucaoParcelas || 1) !== data.caucaoParcelas ||
+      JSON.stringify(existing?.caucaoParcelasItens || []) !== JSON.stringify(data.caucaoParcelasItens || []);
+    if (caucaoMudou) {
+      // Caução alterada (valor, parcelas ou datas): remove entradas não pagas e regenera
+      DB.financeiro = DB.financeiro.filter(f =>
+        !(f.tipo === 'caucao' && f.contrato === data.codigo && !(f.valorRecebido > 0))
+      );
+      const contratoAtualizado = DB.contratos.find(x => x.id === id);
+      if (contratoAtualizado) qtdCaucao = gerarCaucaoContrato(contratoAtualizado);
+    }
   }
 
   saveData();
@@ -2946,17 +3030,15 @@ function gerarParcelasContrato(c) {
 function gerarCaucaoContrato(c) {
   if (!c.caucao || c.caucao <= 0) return 0;
   const n = c.caucaoParcelas || 1;
-  const valorParcela = c.caucao / n;
   const dataBase = c.dataInicio || today();
-  const d1 = new Date(dataBase + 'T12:00:00');
+  // Usa valor/data definidos por parcela; se não houver, cai no padrão (igual + mensal)
+  const itens = (Array.isArray(c.caucaoParcelasItens) && c.caucaoParcelasItens.length === n)
+    ? c.caucaoParcelasItens : null;
+  const valorPadrao = c.caucao / n;
 
   for (let i = 0; i < n; i++) {
-    const totalMeses = d1.getMonth() + i;
-    const ano = d1.getFullYear() + Math.floor(totalMeses / 12);
-    const mes = totalMeses % 12;
-    const ultimoDia = new Date(ano, mes + 1, 0).getDate();
-    const dia = Math.min(d1.getDate(), ultimoDia);
-    const dataVenc = `${ano}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    const valorParcela = itens ? (parseFloat(itens[i].valor) || 0) : valorPadrao;
+    const dataVenc = (itens && itens[i].data) ? itens[i].data : _caucaoDataMensal(dataBase, i);
     const parcelLabel = n > 1 ? `Caução ${i + 1}/${n}` : 'Caução (à vista)';
     const formaLabel = c.caucaoFormaPagamento ? ` — ${c.caucaoFormaPagamento}` : '';
 
@@ -3089,9 +3171,20 @@ function gerarContrato(id) {
   const caucao         = parseFloat(c.caucao)   || 0;
   const caucaoParcelas = parseInt(c.caucaoParcelas) || 1;
   const caucaoParcelaValor = caucaoParcelas > 1 ? caucao / caucaoParcelas : caucao;
-  const caucaoInfo = caucaoParcelas > 1
-    ? `${fmt(caucao)} parcelada em ${caucaoParcelas}x de ${fmt(caucaoParcelaValor)}`
-    : fmt(caucao);
+  // Parcelas com valor/data definidos (ou fallback igual + mensal)
+  const _caucaoItens = (Array.isArray(c.caucaoParcelasItens) && c.caucaoParcelasItens.length === caucaoParcelas)
+    ? c.caucaoParcelasItens : null;
+  let caucaoInfo, caucaoListaLinhas = '';
+  if (caucaoParcelas > 1) {
+    const itens = _caucaoItens || Array.from({ length: caucaoParcelas }, (_, i) => ({
+      valor: caucaoParcelaValor, data: _caucaoDataMensal(c.dataInicio || c.dataContrato || today(), i),
+    }));
+    const partes = itens.map((p, i) => `${i + 1}ª de ${fmt(parseFloat(p.valor) || 0)} em ${fmtDate(p.data)}`);
+    caucaoInfo = `${fmt(caucao)} parcelada em ${caucaoParcelas}x (${partes.join('; ')})`;
+    caucaoListaLinhas = itens.map((p, i) => `Parcela ${i + 1}/${caucaoParcelas}: ${fmt(parseFloat(p.valor) || 0)} — vencimento ${fmtDate(p.data)}`).join('\n');
+  } else {
+    caucaoInfo = fmt(caucao);
+  }
   const taxaAgua  = parseFloat(c.taxaAgua) || 0;
   const entrada   = (c.valorMensal || 0) + caucao;
 
@@ -3150,6 +3243,7 @@ function gerarContrato(id) {
     '{{CONTRATO_CAUCAO_PARCELAS}}':          String(caucaoParcelas),
     '{{CONTRATO_CAUCAO_PARCELA_VALOR}}':     fmt(caucaoParcelaValor),
     '{{CONTRATO_CAUCAO_PARCELA_VALOR_EXTENSO}}': valorPorExtenso(caucaoParcelaValor),
+    '{{CONTRATO_CAUCAO_PARCELAS_LISTA}}':    caucaoListaLinhas,
     '{{CONTRATO_TAXA_AGUA}}':              fmt(taxaAgua),
     '{{CONTRATO_TAXA_AGUA_EXTENSO}}':      valorPorExtenso(taxaAgua),
     '{{CONTRATO_TAXA_MANUTENCAO}}':        fmt(parseFloat(c.taxaManutencao) || 0),
