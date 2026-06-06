@@ -2550,7 +2550,14 @@ function renderContratos() {
              <button class="btn btn-danger btn-sm" title="Remover arquivo" onclick="removeContratoArquivo(${c.id})">🗑</button>`
           : `<button class="btn btn-ghost btn-sm upload-inline-btn" onclick="triggerInlineUpload(${c.id})">📎 Anexar</button>`;
         const caucaoVal = c.caucao > 0 ? fmt(c.caucao) : null;
-        const caucaoParc = c.caucaoParcelas > 1 ? `${c.caucaoParcelas}x de ${fmt(c.caucao / c.caucaoParcelas)}` : null;
+        const _cItens = (Array.isArray(c.caucaoParcelasItens) && c.caucaoParcelasItens.length === c.caucaoParcelas)
+          ? c.caucaoParcelasItens : null;
+        let caucaoParc = null;
+        if (c.caucaoParcelas > 1) {
+          caucaoParc = _cItens
+            ? `${c.caucaoParcelas}x:<br>` + _cItens.map((p, i) => `&nbsp;&nbsp;${i + 1}ª ${fmt(parseFloat(p.valor) || 0)} · ${fmtDate(p.data)}`).join('<br>')
+            : `${c.caucaoParcelas}x de ${fmt(c.caucao / c.caucaoParcelas)}`;
+        }
         const caucaoForma = c.caucaoFormaPagamento || null;
         const caucaoCell = caucaoVal
           ? `<strong>${caucaoVal}</strong>
