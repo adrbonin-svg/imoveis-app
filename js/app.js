@@ -3345,35 +3345,80 @@ function gerarContrato(id) {
   document.getElementById('modal-ct-preview').classList.add('open');
 }
 
-function imprimirContrato() {
-  // Chrome exige desmarcar "Cabeçalhos e rodapés" no diálogo — dica visual para o usuário
-  const tip = document.createElement('div');
-  tip.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#1e40af;color:#fff;padding:14px 18px;border-radius:10px;font-size:13px;z-index:99999;max-width:340px;box-shadow:0 6px 20px rgba(0,0,0,.35);line-height:1.5';
-  tip.innerHTML = '🖨️ <strong>Na janela de impressão:</strong><br>Clique em <em>"Mais configurações"</em> e desmarque <strong>"Cabeçalhos e rodapés"</strong> para remover a data/hora.';
-  document.body.appendChild(tip);
-  setTimeout(() => tip.remove(), 9000);
+// Margens e dimensões da impressão (A4). Aplicadas em TODAS as páginas.
+const _PRINT_CFG = { margemCm: 2.5, fonte: "'Times New Roman', Georgia, serif", fontePt: 12, linha: 1.6 };
 
+// Divide o conteúdo do contrato em páginas A4, medindo a altura real de cada parágrafo.
+function _paginarContrato(html) {
+  const PX_CM = 37.795;
+  const PAGE_W = Math.round(21.0 * PX_CM);   // 210mm
+  const PAGE_H = Math.round(29.7 * PX_CM);   // 297mm
+  const M = Math.round(_PRINT_CFG.margemCm * PX_CM);
+  const contentW = PAGE_W - M * 2;
+  const contentH = PAGE_H - M * 2 - Math.round(0.9 * PX_CM) - 16; // reserva rodapé + folga
+
+  const meas = document.createElement('div');
+  meas.style.cssText = `position:absolute;left:-99999px;top:0;width:${contentW}px;`
+    + `font-family:${_PRINT_CFG.fonte};font-size:${_PRINT_CFG.fontePt}pt;line-height:${_PRINT_CFG.linha};`
+    + `text-align:justify;visibility:hidden`;
+  document.body.appendChild(meas);
+
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  tmp.querySelectorAll('.no-print').forEach(n => n.remove());
+  const nodes = Array.from(tmp.childNodes).filter(n => n.nodeType === 1);
+
+  const pages = [];
+  let current = document.createElement('div');
+  const flush = () => { if (current.childNodes.length) { pages.push(current.innerHTML); current = document.createElement('div'); } };
+
+  for (const node of nodes) {
+    current.appendChild(node.cloneNode(true));
+    meas.innerHTML = current.innerHTML;
+    if (meas.scrollHeight > contentH && current.childNodes.length > 1) {
+      current.removeChild(current.lastChild); // tira o que estourou
+      flush();
+      current.appendChild(node.cloneNode(true)); // começa nova página com ele
+    }
+  }
+  flush();
+  meas.remove();
+  return pages.length ? pages : [html];
+}
+
+function imprimirContrato() {
   const body = document.getElementById('modal-ct-preview-body').innerHTML;
+  const pages = _paginarContrato(body);
+  const total = pages.length;
+  const sheets = pages.map((p, i) => `
+    <div class="sheet">
+      <div class="content">${p}</div>
+      <div class="pg-footer">Página ${i + 1} de ${total}</div>
+    </div>`).join('');
+
   const w = window.open('', '_blank');
   w.document.title = ' ';
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title> </title>
     <style>
-      /* margem 0 na página suprime cabeçalho/rodapé (data/URL) do navegador;
-         a margem real do documento vem do padding do body */
+      /* margem 0 da @page remove cabeçalho/rodapé do navegador; a margem real
+         vem do padding de cada folha (.sheet), aplicada em TODAS as páginas */
       @page { size: A4; margin: 0; }
       * { box-sizing: border-box; }
-      html, body { margin: 0; }
-      body {
-        font-family: 'Times New Roman', Georgia, serif; font-size: 12pt; color: #000;
-        padding: 2.2cm 2.5cm; line-height: 1.6; text-align: justify;
-        -webkit-print-color-adjust: exact; print-color-adjust: exact;
-      }
-      p { margin: 5px 0; orphans: 2; widows: 2; }
-      h1, h2, h3 { text-align: center; margin: 0 0 12px; }
+      html, body { margin: 0; padding: 0; }
+      body { font-family: ${_PRINT_CFG.fonte}; font-size: ${_PRINT_CFG.fontePt}pt; color: #000;
+             -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .sheet { width: 210mm; height: 297mm; padding: ${_PRINT_CFG.margemCm}cm; position: relative;
+               page-break-after: always; overflow: hidden; }
+      .sheet:last-child { page-break-after: auto; }
+      .content { line-height: ${_PRINT_CFG.linha}; text-align: justify; }
+      .content p { margin: 5px 0; orphans: 2; widows: 2; }
+      .content h1, .content h2, .content h3 { text-align: center; margin: 0 0 12px; }
       strong { font-weight: 700; }
+      .pg-footer { position: absolute; bottom: 1.1cm; left: ${_PRINT_CFG.margemCm}cm; right: ${_PRINT_CFG.margemCm}cm;
+                   text-align: center; font-size: 9pt; color: #444; border-top: 1px solid #ccc; padding-top: 4px; }
       .no-print { display: none !important; }
     </style>
-    </head><body>${body}<script>window.onload=()=>{window.print();window.close();}<\/script></body></html>`);
+    </head><body>${sheets}<script>window.onload=()=>{window.print();window.close();}<\/script></body></html>`);
   w.document.close();
 }
 
