@@ -368,15 +368,48 @@ function saveData() {
     body: json,
   })
     .then(r => (r.ok ? r.json() : null))
-    .then(resp => { if (resp && typeof resp._rev === 'number') _dbRev = resp._rev; })
+    .then(resp => { if (resp && typeof resp._rev === 'number') { _dbRev = resp._rev; _persistRev(_dbRev); } })
     .catch(() => {});
 }
 
-// Após carregar do localStorage (que não tem binários), busca os binários do servidor
-// e preenche apenas os campos que estão nulos — sem sobrescrever dados recentes.
-function _hydrateBinaryFromServer() {
+// Persiste a versão sincronizada para detectar mudanças entre recarregamentos.
+function _persistRev(rev) {
+  try { localStorage.setItem('imoveis_db_rev', String(rev)); } catch {}
+}
+function _lerRevPersistido() {
+  const v = parseInt(localStorage.getItem('imoveis_db_rev') || '0', 10);
+  return isNaN(v) ? 0 : v;
+}
+
+// Re-renderiza a página atualmente ativa (após adotar dados novos do servidor).
+function _reRenderAtual() {
+  try {
+    const ativa = document.querySelector('.page.active');
+    if (ativa && ativa.id && ativa.id.indexOf('page-') === 0 && typeof renderPage === 'function') {
+      renderPage(ativa.id.slice('page-'.length));
+    }
+  } catch {}
+}
+
+// Sincroniza com o servidor após o paint instantâneo do localStorage.
+// - Se o servidor tem uma versão (_rev) diferente da local, ADOTA o estado completo
+//   e re-renderiza a tela — assim atualizações de outra sessão/dispositivo aparecem
+//   sozinhas, SEM precisar limpar cache/cookies.
+// - Se a versão é a mesma, apenas completa os binários (fotos/docs) que faltam no cache.
+function _syncFromServer() {
   fetch('/api/db').then(r => r.ok ? r.json() : null).then(srv => {
     if (!srv || srv.error) return;
+    const srvRev = (typeof srv._rev === 'number') ? srv._rev : null;
+
+    if (srvRev !== null && srvRev !== _dbRev) {
+      // Servidor é a fonte da verdade (protegido por trava _rev) → adota tudo.
+      _applyParsedData(srv, true); // grava cache (sem binários) e atualiza _dbRev
+      _persistRev(_dbRev);
+      _reRenderAtual();
+      return;
+    }
+
+    // Mesma versão: completa apenas binários ausentes no cache local.
     const merge = (localArr, srvArr) => {
       if (!Array.isArray(localArr) || !Array.isArray(srvArr)) return;
       localArr.forEach(loc => {
@@ -396,7 +429,7 @@ function _hydrateBinaryFromServer() {
     merge(DB.contratos,  srv.contratos);
     merge(DB.manutencao, srv.manutencao);
     if (Array.isArray(srv.auditoria)) DB.auditoria = srv.auditoria;
-    if (typeof srv._rev === 'number') _dbRev = srv._rev; // sincroniza versão do servidor
+    if (srvRev !== null) { _dbRev = srvRev; _persistRev(srvRev); }
   }).catch(() => {});
 }
 
@@ -512,9 +545,10 @@ async function loadData() {
   if (saved) {
     try {
       _applyParsedData(JSON.parse(saved), false);
+      _dbRev = _lerRevPersistido(); // versão conhecida do cache p/ comparar com o servidor
       _dataReadyResolve();
-      // Hidrata fotos/docs/comprovantes do servidor em background
-      _hydrateBinaryFromServer();
+      // Sincroniza com o servidor: adota dados novos (outra sessão) e/ou hidrata binários
+      _syncFromServer();
       return;
     } catch (e) {
       console.warn('[loadData] localStorage corrompido, tentando servidor...', e);
@@ -528,6 +562,7 @@ async function loadData() {
       const serverData = await res.json();
       if (serverData && !serverData.error) {
         _applyParsedData(serverData, true); // salva versão sem binários no localStorage
+        _persistRev(_dbRev);
         console.info('[loadData] Dados carregados do servidor.');
       }
     }
