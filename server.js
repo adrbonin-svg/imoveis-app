@@ -114,7 +114,7 @@ const emailTemplates = {
         <h2 style="color:#1a56db;margin-bottom:4px">Olá, ${nome}!</h2>
         <p style="color:#6b7280;margin-top:0">Um novo boleto foi gerado para você.</p>
         <div style="background:#fff;border-radius:10px;padding:24px;margin:24px 0;border:1px solid #e5e7eb">
-          <p style="margin:0 0 10px;font-size:14px;color:#374151"><strong>📄 Contrato:</strong> ${contrato}</p>
+          <p style="margin:0 0 10px;font-size:14px;color:#374151"><strong>🏠 Imóvel:</strong> ${contrato}</p>
           <p style="margin:0 0 10px;font-size:14px;color:#374151"><strong>💰 Valor:</strong> R$ ${valor}</p>
           <p style="margin:0 0 20px;font-size:14px;color:#374151"><strong>📅 Vencimento:</strong> ${vencimento}</p>
           ${linkBoleto ? `<a href="${linkBoleto}" style="display:inline-block;background:#1a56db;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">📥 Visualizar / Pagar Boleto</a>` : ''}

@@ -5311,13 +5311,30 @@ async function gerarBoleto(finId) {
     const observacoesBoleto  = linhasObs.join(' | ');
     const instrucoesBoleto   = linhasInst.join('\n');
 
+    // Nome da unidade (imóvel) — usado no lugar do código do contrato
+    const _unidade = contrato?.imovel || f.contrato;
+    // Discriminação compacta dos valores para o description (único campo impresso pelo Asaas)
+    const _descParts = [];
+    if ((f.valorContrato  || 0) > 0) _descParts.push(`Aluguel R$ ${_fmt2(f.valorContrato)}`);
+    if ((f.consumoAgua    || 0) > 0) _descParts.push(`Água R$ ${_fmt2(f.consumoAgua)}`);
+    if ((f.taxaManutencao || 0) > 0) _descParts.push(`Manutenção R$ ${_fmt2(f.taxaManutencao)}`);
+    if ((f.taxasExtras    || 0) > 0) _descParts.push(`Extras R$ ${_fmt2(f.taxasExtras)}`);
+    if ((f.totalEnergia   || 0) > 0) {
+      const _kwh = Math.max(0, (f.leituraAtual || 0) - (f.leituraAnterior || 0));
+      _descParts.push(`Energia ${_kwh} kWh R$ ${_fmt2(f.totalEnergia)}`);
+    }
+    const _discrimCurta = _descParts.length
+      ? `. Discriminação: ${_descParts.join('; ')}. Total: R$ ${_fmt2(f.totalGeral || f.valorContrato || 0)}`
+      : '';
+    const _descricaoBoleto = (`${_nomeLoc} — Aluguel ${_unidade} — ${fmtDate(f.dataPagamento)}` + _discrimCurta).slice(0, 500);
+
     // 3) Cria pagamento (boleto)
     const payRes = await _asaasCall('POST', '/payment', {
       customer:      customerId,
       billingType:   'BOLETO',
       value:         parseFloat(f.totalGeral) || parseFloat(f.valorContrato) || 0,
       dueDate:       f.dataPagamento,
-      description:   `${_nomeLoc} — Aluguel ${f.contrato} — ${fmtDate(f.dataPagamento)}`,
+      description:   _descricaoBoleto,
       observations:  observacoesBoleto,
       instructions:  instrucoesBoleto,
       externalReference: String(f.id),
@@ -5358,7 +5375,7 @@ async function gerarBoleto(finId) {
     if (inq?.email) {
       const finAtual = DB.financeiro[idx];
       _enviarEmailInquilino('boleto', inq.id, {
-        contrato:   f.contrato,
+        contrato:   _unidade,
         valor:      (finAtual.totalGeral || finAtual.valorContrato || 0)
                       .toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
         vencimento: new Date(f.dataPagamento + 'T12:00:00').toLocaleDateString('pt-BR'),
@@ -5469,7 +5486,7 @@ function enviarBoletoWhatsappDireto(finId) {
   let texto = `Olá ${f.inquilino || 'inquilino'}, segue informações do pagamento referente ao aluguel de ${fmtDate(f.dataPagamento)}.\n\n`;
   if (benef) texto += `Beneficiário: ${benef}\n`;
   texto += `Valor: ${fmt(f.totalGeral || f.valorContrato)}\n`;
-  texto += `Contrato: ${f.contrato}\n`;
+  texto += `Imóvel: ${contrato?.imovel || f.contrato}\n`;
   if (f.boletoLinha) texto += `\nLinha digitável:\n${f.boletoLinha}\n`;
   if (f.asaasPaymentId) texto += `\nPDF do boleto:\n${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf`;
   texto += _textoAcessoInquilino(inq?.id);
