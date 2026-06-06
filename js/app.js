@@ -3338,8 +3338,10 @@ function gerarContrato(id) {
   ${inq.id ? `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="closeModal('modal-ct-preview');openInquilino(${inq.id})">✏ Editar cadastro do inquilino</button>` : ''}
 </div>`;
 
+  // Painel de diagnóstico é só para o admin — o inquilino vê apenas o contrato
+  const _ehInquilino = (typeof _currentUser !== 'undefined' && _currentUser && _currentUser.perfil === 'inquilino');
   document.getElementById('preview-ct-title').textContent = `Contrato ${c.codigo} — ${c.imovel}`;
-  document.getElementById('modal-ct-preview-body').innerHTML = inqInfoBar + html;
+  document.getElementById('modal-ct-preview-body').innerHTML = (_ehInquilino ? '' : inqInfoBar) + html;
   document.getElementById('modal-ct-preview').classList.add('open');
 }
 
@@ -6917,6 +6919,7 @@ function _portalRenderContratos(inq) {
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span class="badge ${ativo ? 'badge-green' : 'badge-gray'}">${c.status}</span>
+          <button class="btn btn-primary btn-sm" onclick="gerarContrato(${c.id})">📄 Ver / Imprimir</button>
           ${btnArquivo}
         </div>
       </div>
