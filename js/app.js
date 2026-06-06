@@ -3358,17 +3358,30 @@ function imprimirContrato() {
   w.document.title = ' ';
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title> </title>
     <style>
+      /* margem 0 na página suprime cabeçalho/rodapé (data/URL) do navegador;
+         a margem real do documento vem do padding do body */
       @page { size: A4; margin: 0; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; }
       body {
-        font-family: 'Times New Roman', serif; font-size: 12pt; color: #000;
-        margin: 0; padding: 2cm;
+        font-family: 'Times New Roman', Georgia, serif; font-size: 12pt; color: #000;
+        padding: 2.2cm 2.5cm; line-height: 1.6; text-align: justify;
         -webkit-print-color-adjust: exact; print-color-adjust: exact;
       }
-      p { margin: 4px 0; line-height: 1.6; }
+      p { margin: 5px 0; orphans: 2; widows: 2; }
+      h1, h2, h3 { text-align: center; margin: 0 0 12px; }
+      strong { font-weight: 700; }
       .no-print { display: none !important; }
     </style>
     </head><body>${body}<script>window.onload=()=>{window.print();window.close();}<\/script></body></html>`);
   w.document.close();
+}
+
+// Gera e imprime o contrato em 1 clique (usado no portal do inquilino)
+function imprimirContratoDireto(id) {
+  gerarContrato(id);                 // preenche o corpo da prévia
+  imprimirContrato();                // abre a janela de impressão
+  closeModal('modal-ct-preview');    // não precisa deixar a prévia aberta
 }
 
 const CT_CAMPOS = {
@@ -6919,7 +6932,8 @@ function _portalRenderContratos(inq) {
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span class="badge ${ativo ? 'badge-green' : 'badge-gray'}">${c.status}</span>
-          <button class="btn btn-primary btn-sm" onclick="gerarContrato(${c.id})">📄 Ver / Imprimir</button>
+          <button class="btn btn-ghost btn-sm" onclick="gerarContrato(${c.id})">📄 Ver</button>
+          <button class="btn btn-primary btn-sm" onclick="imprimirContratoDireto(${c.id})">🖨️ Imprimir</button>
           ${btnArquivo}
         </div>
       </div>
