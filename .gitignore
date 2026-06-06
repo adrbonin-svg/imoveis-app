@@ -5,3 +5,5 @@ webhook-events.json
 .DS_Store
 Thumbs.db
 db.json
+db.json.*
+backups/

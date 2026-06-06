@@ -349,9 +349,13 @@ function _dbParaLocal(db) {
   return copia;
 }
 
+// Versão (rev) do banco no servidor — usada para trava otimista e evitar que uma
+// aba defasada sobrescreva dados criados por outra sessão.
+let _dbRev = 0;
+
 // Persistência no localStorage (sem binários) + backup completo no servidor
 function saveData() {
-  const json = JSON.stringify(DB);
+  const json = JSON.stringify({ ...DB, _rev: _dbRev });
   try {
     localStorage.setItem('imoveis_db', JSON.stringify(_dbParaLocal(DB)));
   } catch (e) {
@@ -362,7 +366,10 @@ function saveData() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: json,
-  }).catch(() => {});
+  })
+    .then(r => (r.ok ? r.json() : null))
+    .then(resp => { if (resp && typeof resp._rev === 'number') _dbRev = resp._rev; })
+    .catch(() => {});
 }
 
 // Após carregar do localStorage (que não tem binários), busca os binários do servidor
@@ -389,11 +396,15 @@ function _hydrateBinaryFromServer() {
     merge(DB.contratos,  srv.contratos);
     merge(DB.manutencao, srv.manutencao);
     if (Array.isArray(srv.auditoria)) DB.auditoria = srv.auditoria;
+    if (typeof srv._rev === 'number') _dbRev = srv._rev; // sincroniza versão do servidor
   }).catch(() => {});
 }
 
 // Aplica dados carregados (localStorage ou servidor) ao DB com migrações
 function _applyParsedData(parsed, persistLocalStorage) {
+  // Captura a versão do servidor (trava otimista) e remove do objeto de dados.
+  if (typeof parsed._rev === 'number') _dbRev = parsed._rev;
+  delete parsed._rev;
   if (parsed.config) {
     parsed.config = Object.assign({}, DB.config, parsed.config);
     if (!parsed.config.modeloContrato)     parsed.config.modeloContrato     = DB.config.modeloContrato;

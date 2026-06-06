@@ -7,6 +7,7 @@ const nodemailer   = require('nodemailer');
 
 // ── MongoDB (persistência permanente entre deploys) ─────
 let _mongo = null;
+let _mongoClient = null;
 
 async function getCol() {
   if (!process.env.MONGODB_URI) return null;
@@ -14,12 +15,14 @@ async function getCol() {
     if (!_mongo) {
       const client = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
       await client.connect();
+      _mongoClient = client;
       _mongo = client.db('imoveis').collection('appdata');
     }
     return _mongo;
   } catch (e) {
     console.error('[MongoDB] Conexão falhou:', e.message);
     _mongo = null;
+    _mongoClient = null;
     return null;
   }
 }
@@ -183,33 +186,141 @@ function writeEnvFile(vars) {
 }
 
 // ── Banco de dados do app (MongoDB → fallback arquivo) ─
-const DB_FILE = path.join(__dirname, 'db.json');
+const DB_FILE     = path.join(__dirname, 'db.json');
+const BACKUP_DIR  = path.join(__dirname, 'backups');
+const MAX_BACKUPS = 80;
+
+// Coleções "lista" do app — usadas pelo merge seguro para nunca perder registros.
+const LIST_KEYS = [
+  'inquilinos', 'imoveis', 'contratos', 'financeiro', 'predios',
+  'manutencao', 'manutencaoPreventiva', 'usuarios', 'empresas',
+  'auditoria', 'notificacoes', 'cobrancasEmpresas',
+];
+
+// Snapshot de segurança em arquivo (fallback sem Mongo)
+function backupToFile(data) {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.writeFileSync(path.join(BACKUP_DIR, `db-${stamp}.json`), JSON.stringify(data));
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter(f => f.startsWith('db-') && f.endsWith('.json')).sort();
+    while (files.length > MAX_BACKUPS) {
+      try { fs.unlinkSync(path.join(BACKUP_DIR, files.shift())); } catch {}
+    }
+  } catch (e) { console.error('[Backup arquivo] falha:', e.message); }
+}
+
+// Snapshot de segurança no Mongo (coleção appdata_backups, rotaciona últimos N)
+async function backupToMongo(snapshot) {
+  try {
+    if (!_mongoClient) return;
+    const col = _mongoClient.db('imoveis').collection('appdata_backups');
+    await col.insertOne({ at: new Date(), rev: snapshot._rev || 0, data: snapshot });
+    const total = await col.countDocuments();
+    if (total > MAX_BACKUPS) {
+      const old = await col.find({}, { projection: { _id: 1 } })
+        .sort({ at: 1 }).limit(total - MAX_BACKUPS).toArray();
+      if (old.length) await col.deleteMany({ _id: { $in: old.map(o => o._id) } });
+    }
+  } catch (e) { console.error('[Backup Mongo] falha:', e.message); }
+}
+
+// Mescla preservando registros que existem no servidor mas faltam no payload do
+// cliente. Acionado quando o cliente está com _rev defasado: prioriza a versão do
+// cliente para os IDs que ele conhece, mas NUNCA descarta o que ele desconhece.
+function safeMerge(serverData, clientData) {
+  const out = { ...serverData, ...clientData };
+  for (const k of LIST_KEYS) {
+    const srv = Array.isArray(serverData[k]) ? serverData[k] : [];
+    const cli = Array.isArray(clientData[k]) ? clientData[k] : [];
+    if (!srv.length) { out[k] = cli; continue; }
+    const byId = new Map();
+    for (const r of cli) byId.set(r.id, r);          // versão nova dos conhecidos
+    for (const r of srv) if (!byId.has(r.id)) byId.set(r.id, r); // não perde os demais
+    out[k] = Array.from(byId.values());
+  }
+  return out;
+}
 
 app.get('/api/db', async (req, res) => {
   const col = await getCol();
   if (col) {
     const doc = await col.findOne({ _id: 'main' });
-    if (doc) { const { _id, ...data } = doc; return res.json(data); }
+    if (doc) { const { _id, ...data } = doc; if (data._rev == null) data._rev = 0; return res.json(data); }
     return res.status(404).json({ error: 'Sem dados' });
   }
   // Fallback: arquivo local (apagado a cada deploy — apenas dev)
   try {
-    res.json(JSON.parse(fs.readFileSync(DB_FILE, 'utf8')));
+    const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    if (data._rev == null) data._rev = 0;
+    res.json(data);
   } catch {
     res.status(404).json({ error: 'Sem dados salvos' });
   }
 });
 
 app.post('/api/db', async (req, res) => {
+  const body = { ...(req.body || {}) };
+  const clientRev = body._rev;   // versão que o cliente acredita ter
+  delete body._rev;
+  delete body._id;
+
   const col = await getCol();
   if (col) {
-    await col.replaceOne({ _id: 'main' }, { _id: 'main', ...req.body }, { upsert: true });
-    return res.json({ ok: true });
+    try {
+      // Trava otimista com retry: garante que ninguém sobrescreva às cegas.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const current = await col.findOne({ _id: 'main' });
+        const serverData = current ? (() => { const { _id, ...d } = current; return d; })() : null;
+        const serverRev  = serverData ? (serverData._rev || 0) : 0;
+
+        if (serverData) await backupToMongo(serverData); // snapshot ANTES de escrever
+
+        let finalData, merged = false;
+        if (!serverData || clientRev === undefined || clientRev === serverRev) {
+          finalData = body;                         // cliente em dia → escrita completa
+        } else {
+          finalData = safeMerge(serverData, body);  // cliente defasado → merge sem perda
+          merged = true;
+          console.warn(`[api/db] rev cliente=${clientRev} ≠ servidor=${serverRev} → merge seguro`);
+        }
+        finalData._rev = serverRev + 1;
+
+        // CAS: só grava se o _rev no banco ainda for o que lemos (evita corrida).
+        const filter = serverData
+          ? { _id: 'main', $or: [{ _rev: serverRev }, { _rev: { $exists: false } }] }
+          : { _id: 'main', $exists: false };
+        const result = serverData
+          ? await col.replaceOne(filter, { _id: 'main', ...finalData })
+          : await col.updateOne({ _id: 'main' }, { $setOnInsert: { _id: 'main', ...finalData } }, { upsert: true });
+
+        const wrote = serverData ? result.modifiedCount > 0 : (result.upsertedCount > 0 || result.modifiedCount > 0);
+        if (wrote) return res.json({ ok: true, _rev: finalData._rev, merged });
+        // alguém escreveu no meio → tenta de novo com o estado mais recente
+      }
+      return res.status(409).json({ ok: false, error: 'Conflito de concorrência — recarregue e tente novamente' });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
   }
   // Fallback: arquivo local
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(req.body), 'utf8');
-    res.json({ ok: true });
+    let serverData = null;
+    try { serverData = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch {}
+    const serverRev = serverData ? (serverData._rev || 0) : 0;
+    if (serverData) backupToFile(serverData);
+
+    let finalData, merged = false;
+    if (!serverData || clientRev === undefined || clientRev === serverRev) {
+      finalData = body;
+    } else {
+      finalData = safeMerge(serverData, body);
+      merged = true;
+    }
+    finalData._rev = serverRev + 1;
+    fs.writeFileSync(DB_FILE, JSON.stringify(finalData), 'utf8');
+    res.json({ ok: true, _rev: finalData._rev, merged });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
