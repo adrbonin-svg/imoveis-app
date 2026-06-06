@@ -5373,20 +5373,30 @@ async function gerarBoleto(finId) {
 
     // Nome da unidade (imóvel) — usado no lugar do código do contrato
     const _unidade = contrato?.imovel || f.contrato;
+    const _ehCaucao = f.tipo === 'caucao';
+    // Rótulo: caução usa as observações ("Caução 1/2"); cobrança normal usa "Aluguel"
+    const _rotulo = _ehCaucao ? (f.observacoes || 'Caução') : 'Aluguel';
+
     // Discriminação compacta dos valores para o description (único campo impresso pelo Asaas)
-    const _descParts = [];
-    if ((f.valorContrato  || 0) > 0) _descParts.push(`Aluguel R$ ${_fmt2(f.valorContrato)}`);
-    if ((f.consumoAgua    || 0) > 0) _descParts.push(`Água R$ ${_fmt2(f.consumoAgua)}`);
-    if ((f.taxaManutencao || 0) > 0) _descParts.push(`Manutenção R$ ${_fmt2(f.taxaManutencao)}`);
-    if ((f.taxasExtras    || 0) > 0) _descParts.push(`Extras R$ ${_fmt2(f.taxasExtras)}`);
-    if ((f.totalEnergia   || 0) > 0) {
-      const _kwh = Math.max(0, (f.leituraAtual || 0) - (f.leituraAnterior || 0));
-      _descParts.push(`Energia ${_kwh} kWh R$ ${_fmt2(f.totalEnergia)}`);
+    let _discrimCurta = '';
+    if (_ehCaucao) {
+      const _valC = f.caucaoValor || f.totalGeral || 0;
+      _discrimCurta = `. Valor da caução: R$ ${_fmt2(_valC)}`;
+    } else {
+      const _descParts = [];
+      if ((f.valorContrato  || 0) > 0) _descParts.push(`Aluguel R$ ${_fmt2(f.valorContrato)}`);
+      if ((f.consumoAgua    || 0) > 0) _descParts.push(`Água R$ ${_fmt2(f.consumoAgua)}`);
+      if ((f.taxaManutencao || 0) > 0) _descParts.push(`Manutenção R$ ${_fmt2(f.taxaManutencao)}`);
+      if ((f.taxasExtras    || 0) > 0) _descParts.push(`Extras R$ ${_fmt2(f.taxasExtras)}`);
+      if ((f.totalEnergia   || 0) > 0) {
+        const _kwh = Math.max(0, (f.leituraAtual || 0) - (f.leituraAnterior || 0));
+        _descParts.push(`Energia ${_kwh} kWh R$ ${_fmt2(f.totalEnergia)}`);
+      }
+      _discrimCurta = _descParts.length
+        ? `. Discriminação: ${_descParts.join('; ')}. Total: R$ ${_fmt2(f.totalGeral || f.valorContrato || 0)}`
+        : '';
     }
-    const _discrimCurta = _descParts.length
-      ? `. Discriminação: ${_descParts.join('; ')}. Total: R$ ${_fmt2(f.totalGeral || f.valorContrato || 0)}`
-      : '';
-    const _descricaoBoleto = (`${_nomeLoc} — Aluguel ${_unidade} — ${fmtDate(f.dataPagamento)}` + _discrimCurta).slice(0, 500);
+    const _descricaoBoleto = (`${_nomeLoc} — ${_rotulo} — ${_unidade} — ${fmtDate(f.dataPagamento)}` + _discrimCurta).slice(0, 500);
 
     // 3) Cria pagamento (boleto)
     const payRes = await _asaasCall('POST', '/payment', {
