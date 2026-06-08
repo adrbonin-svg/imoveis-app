@@ -5545,6 +5545,25 @@ function _textoAcessoInquilino(inqId) {
   );
 }
 
+// Monta a discriminação detalhada do que está sendo cobrado (para mensagens WhatsApp)
+function _discriminacaoPagamentoWhats(f) {
+  if (!f) return '';
+  const linhas = [];
+  if ((f.valorContrato  || 0) > 0) linhas.push(`• Aluguel: ${fmt(f.valorContrato)}`);
+  if ((f.consumoAgua    || 0) > 0) linhas.push(`• Taxa de Água: ${fmt(f.consumoAgua)}`);
+  if ((f.taxaManutencao || 0) > 0) linhas.push(`• Taxa de Manutenção: ${fmt(f.taxaManutencao)}`);
+  if ((f.taxasExtras    || 0) > 0) linhas.push(`• Taxas Extras: ${fmt(f.taxasExtras)}`);
+  if ((f.totalEnergia   || 0) > 0) {
+    const kwh  = Math.max(0, (f.leituraAtual || 0) - (f.leituraAnterior || 0));
+    const desc = (f.descontoEnergia || 0) > 0 ? ` (-${f.descontoEnergia}% desc)` : '';
+    linhas.push(`• Energia ${kwh.toLocaleString('pt-BR')} kWh${desc}: ${fmt(f.totalEnergia)}`);
+  }
+  if ((f.valorMulta || 0) > 0) linhas.push(`• Multa (${f.pctMulta || 0}%): ${fmt(f.valorMulta)}`);
+  if ((f.valorMora  || 0) > 0) linhas.push(`• Mora (${f.pctMora || 0}% x ${f.diasAtraso || 0} dias): ${fmt(f.valorMora)}`);
+  if (!linhas.length) return '';
+  return `\n📋 *Discriminação do pagamento:*\n${linhas.join('\n')}\n`;
+}
+
 function enviarBoletoWhatsapp() {
   const finId = parseInt(document.getElementById('modal-boleto')?.dataset.finId);
   const f = DB.financeiro.find(x => x.id === finId);
@@ -5558,7 +5577,8 @@ function enviarBoletoWhatsapp() {
   const msg = encodeURIComponent(
     `Olá ${f.inquilino || 'inquilino'}, segue o boleto referente ao aluguel de ${fmtDate(f.dataPagamento)}.\n\n` +
     (benef ? `Beneficiário: ${benef}\n` : '') +
-    `Valor: ${fmt(f.totalGeral || f.valorContrato)}\n` +
+    _discriminacaoPagamentoWhats(f) +
+    `\n💰 *Total a pagar: ${fmt(f.totalGeral || f.valorContrato)}*\n` +
     `Linha digitável:\n${f.boletoLinha || ''}\n\n` +
     (f.asaasPaymentId ? `PDF: ${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf` : '') +
     _textoAcessoInquilino(inq?.id)
@@ -5576,8 +5596,9 @@ function enviarBoletoWhatsappDireto(finId) {
   const benef = _asaasEmpConfig().nomeBeneficiario || DB.config.locador?.nome || '';
   let texto = `Olá ${f.inquilino || 'inquilino'}, segue informações do pagamento referente ao aluguel de ${fmtDate(f.dataPagamento)}.\n\n`;
   if (benef) texto += `Beneficiário: ${benef}\n`;
-  texto += `Valor: ${fmt(f.totalGeral || f.valorContrato)}\n`;
   texto += `Imóvel: ${contrato?.imovel || f.contrato}\n`;
+  texto += _discriminacaoPagamentoWhats(f);
+  texto += `\n💰 *Total a pagar: ${fmt(f.totalGeral || f.valorContrato)}*\n`;
   if (f.boletoLinha) texto += `\nLinha digitável:\n${f.boletoLinha}\n`;
   if (f.asaasPaymentId) texto += `\nPDF do boleto:\n${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf`;
   texto += _textoAcessoInquilino(inq?.id);
