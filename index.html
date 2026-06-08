@@ -2185,9 +2185,18 @@
               <label>Consumo do Período (Atual − Anterior)</label>
               <div class="calc-result" id="fin-consumo-kwh">0,000 kWh</div>
             </div>
-            <div class="form-group form-col-2">
+            <div class="form-group">
               <label>Total de Energia = Consumo × Valor kWh</label>
-              <div class="calc-result calc-result-highlight" id="fin-total-energia">R$ 0,00</div>
+              <div class="calc-result" id="fin-total-energia">R$ 0,00</div>
+            </div>
+            <div class="form-group">
+              <label>Desconto de Energia (%)</label>
+              <input name="descontoEnergia" type="number" step="0.01" min="0" max="100" placeholder="0,00" oninput="calcFinanceiro()">
+              <small id="fin-energia-desconto-info" style="display:none;color:#16a34a;font-size:11px;margin-top:3px"></small>
+            </div>
+            <div class="form-group form-col-2">
+              <label>Total de Energia com Desconto</label>
+              <div class="calc-result calc-result-highlight" id="fin-total-energia-liquido">R$ 0,00</div>
             </div>
           </div>
         </div>

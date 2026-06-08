@@ -3768,10 +3768,24 @@ function calcFinanceiro() {
   // Energia: (Leitura Atual − Leitura Anterior) × Valor kWh
   const _tipoEnergia = DB.config.energia?.tipo || 'solar';
   const _isSolar     = _tipoEnergia !== 'coelba';
-  const kwh     = _isSolar ? Math.max(0, num('leituraAtual') - num('leituraAnterior')) : 0;
-  const totEner = _isSolar ? kwh * num('valorKwh') : 0;
+  const kwh        = _isSolar ? Math.max(0, num('leituraAtual') - num('leituraAnterior')) : 0;
+  const totEnerBruto = _isSolar ? kwh * num('valorKwh') : 0;
+  const pctDescEner  = Math.min(100, Math.max(0, num('descontoEnergia')));
+  const descEnerVlr  = totEnerBruto * (pctDescEner / 100);
+  const totEner      = totEnerBruto - descEnerVlr;   // energia líquida (com desconto) → vai pro total
   document.getElementById('fin-consumo-kwh').textContent   = fmtKwh(kwh);
-  document.getElementById('fin-total-energia').textContent = fmt(totEner);
+  document.getElementById('fin-total-energia').textContent = fmt(totEnerBruto);
+  const _elEnerLiq = document.getElementById('fin-total-energia-liquido');
+  if (_elEnerLiq) _elEnerLiq.textContent = fmt(totEner);
+  const _elDescInfo = document.getElementById('fin-energia-desconto-info');
+  if (_elDescInfo) {
+    if (pctDescEner > 0 && totEnerBruto > 0) {
+      _elDescInfo.style.display = '';
+      _elDescInfo.textContent = `− ${fmt(descEnerVlr)} de desconto`;
+    } else {
+      _elDescInfo.style.display = 'none';
+    }
+  }
   const _rowEnergia = document.getElementById('fin-resumo-energia')?.closest('.fin-resumo-row');
   if (_rowEnergia) _rowEnergia.style.display = _isSolar ? '' : 'none';
 
@@ -3905,6 +3919,7 @@ function openFinanceiro(id = null) {
     el('leituraAnterior').value = f.leituraAnterior || 0;
     el('leituraAtual').value    = f.leituraAtual    || 0;
     el('valorKwh').value        = f.valorKwh        || 0;
+    if (el('descontoEnergia')) el('descontoEnergia').value = f.descontoEnergia || 0;
     el('pctMulta').value        = f.pctMulta        || 0;
     el('diasAtraso').value      = f.diasAtraso      || 0;
     el('pctMora').value         = f.pctMora         || 0;
@@ -3947,8 +3962,10 @@ function saveFinanceiro() {
   const id   = form.dataset.id ? parseInt(form.dataset.id) : null;
   const num  = n => parseFloat(form[n]?.value) || 0;
 
-  const kwh          = Math.max(0, num('leituraAtual') - num('leituraAnterior'));
-  const totalEnergia = kwh * num('valorKwh');
+  const kwh               = Math.max(0, num('leituraAtual') - num('leituraAnterior'));
+  const totalEnergiaBruto = kwh * num('valorKwh');
+  const descontoEnergia   = Math.min(100, Math.max(0, num('descontoEnergia')));
+  const totalEnergia      = totalEnergiaBruto * (1 - descontoEnergia / 100);   // líquido (com desconto)
   const valorMulta   = num('valorContrato') * (num('pctMulta') / 100);
   const valorMora    = num('valorContrato') * (num('pctMora') / 100) * num('diasAtraso');
   const totalGeral   = num('valorContrato') + num('consumoAgua') + num('taxaManutencao') + num('taxasExtras') + totalEnergia + valorMulta + valorMora;
@@ -3964,6 +3981,8 @@ function saveFinanceiro() {
     leituraAnterior:num('leituraAnterior'),
     leituraAtual:   num('leituraAtual'),
     valorKwh:       num('valorKwh'),
+    descontoEnergia,
+    totalEnergiaBruto,
     totalEnergia,
     pctMulta:       num('pctMulta'),
     valorMulta,
@@ -5347,8 +5366,9 @@ async function gerarBoleto(finId) {
     }
     if ((f.totalEnergia || 0) > 0) {
       const kwh = Math.max(0, (f.leituraAtual||0) - (f.leituraAnterior||0));
-      linhasObs.push(`Energia (${kwh} kWh x R$ ${(f.valorKwh||0).toFixed(4).replace('.',',')}): R$ ${_fmt2(f.totalEnergia)}`);
-      linhasInst.push(`Energia (${kwh} kWh x R$ ${(f.valorKwh||0).toFixed(4).replace('.',',')}): R$ ${_fmt2(f.totalEnergia)}`);
+      const _descEner = (f.descontoEnergia || 0) > 0 ? ` - ${f.descontoEnergia}% desc` : '';
+      linhasObs.push(`Energia (${kwh} kWh x R$ ${(f.valorKwh||0).toFixed(4).replace('.',',')}${_descEner}): R$ ${_fmt2(f.totalEnergia)}`);
+      linhasInst.push(`Energia (${kwh} kWh x R$ ${(f.valorKwh||0).toFixed(4).replace('.',',')}${_descEner}): R$ ${_fmt2(f.totalEnergia)}`);
     }
     if ((f.valorMulta || 0) > 0) {
       linhasObs.push(`Multa (${f.pctMulta||0}%): R$ ${_fmt2(f.valorMulta)}`);
@@ -5390,7 +5410,8 @@ async function gerarBoleto(finId) {
       if ((f.taxasExtras    || 0) > 0) _descParts.push(`Extras R$ ${_fmt2(f.taxasExtras)}`);
       if ((f.totalEnergia   || 0) > 0) {
         const _kwh = Math.max(0, (f.leituraAtual || 0) - (f.leituraAnterior || 0));
-        _descParts.push(`Energia ${_kwh} kWh R$ ${_fmt2(f.totalEnergia)}`);
+        const _dEner = (f.descontoEnergia || 0) > 0 ? ` (-${f.descontoEnergia}%)` : '';
+        _descParts.push(`Energia ${_kwh} kWh${_dEner} R$ ${_fmt2(f.totalEnergia)}`);
       }
       _discrimCurta = _descParts.length
         ? `. Discriminação: ${_descParts.join('; ')}. Total: R$ ${_fmt2(f.totalGeral || f.valorContrato || 0)}`
