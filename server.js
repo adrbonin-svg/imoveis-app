@@ -278,10 +278,12 @@ app.post('/api/db', async (req, res) => {
         if (serverData) await backupToMongo(serverData); // snapshot ANTES de escrever
 
         let finalData, merged = false;
-        if (!serverData || clientRev === undefined || clientRev === serverRev) {
+        if (!serverData || clientRev === serverRev) {
           finalData = body;                         // cliente em dia → escrita completa
         } else {
-          finalData = safeMerge(serverData, body);  // cliente defasado → merge sem perda
+          // Cliente defasado OU sem _rev (cache limpo/aba antiga): NUNCA escrita cega.
+          // Merge preservando o que o cliente desconhece evita perda em massa.
+          finalData = safeMerge(serverData, body);
           merged = true;
           console.warn(`[api/db] rev cliente=${clientRev} ≠ servidor=${serverRev} → merge seguro`);
         }
@@ -312,10 +314,10 @@ app.post('/api/db', async (req, res) => {
     if (serverData) backupToFile(serverData);
 
     let finalData, merged = false;
-    if (!serverData || clientRev === undefined || clientRev === serverRev) {
+    if (!serverData || clientRev === serverRev) {
       finalData = body;
     } else {
-      finalData = safeMerge(serverData, body);
+      finalData = safeMerge(serverData, body);  // defasado ou sem _rev → merge sem perda
       merged = true;
     }
     finalData._rev = serverRev + 1;

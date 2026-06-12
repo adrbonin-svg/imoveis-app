@@ -573,7 +573,14 @@ async function loadData() {
 }
 
 function nextId(arr) {
-  return arr.length > 0 ? Math.max(...arr.map(x => x.id)) + 1 : 1;
+  // ID globalmente único (timestamp + aleatório) para evitar colisão entre abas/
+  // dispositivos editando ao mesmo tempo — causa-raiz da perda de registros, pois
+  // o Math.max+1 fazia duas sessões gerarem o MESMO id e um sobrescrevia o outro.
+  const list = Array.isArray(arr) ? arr : [];
+  const existing = new Set(list.map(x => x.id));
+  let id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+  while (existing.has(id)) id++;
+  return id;
 }
 
 loadData();
