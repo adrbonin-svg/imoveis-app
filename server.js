@@ -328,6 +328,119 @@ app.post('/api/db', async (req, res) => {
   }
 });
 
+// ── Persistência GRANULAR (1 registro por operação) ─────────────────────────
+// Elimina a perda de dados por sobrescrita: uma operação NUNCA substitui a
+// coleção inteira nem reenvia o banco do cliente. Cada criar/editar/excluir
+// toca apenas o registro alvo. O servidor é quem garante o ID único (item 1).
+
+// Maior id numérico em uso em TODAS as coleções (ids únicos globais).
+function maxIdGlobal(data) {
+  let max = 0;
+  for (const k of LIST_KEYS) {
+    for (const r of (data[k] || [])) {
+      if (typeof r.id === 'number' && r.id > max) max = r.id;
+    }
+  }
+  return max;
+}
+
+// Aplica um upsert numa cópia do db e devolve o registro final (com id garantido).
+function applyUpsert(data, collection, record) {
+  if (!Array.isArray(data[collection])) data[collection] = [];
+  const arr = data[collection];
+  const rec = { ...record };
+  const isNew = rec._new === true;
+  delete rec._new;
+
+  if (rec.id == null) {
+    rec.id = maxIdGlobal(data) + 1;                 // servidor atribui
+  } else if (isNew && arr.some(x => x.id === rec.id)) {
+    rec.id = Math.max(maxIdGlobal(data) + 1, rec.id + 1); // colisão em criação → reatribui
+  }
+
+  const idx = arr.findIndex(x => x.id === rec.id);
+  if (idx >= 0) arr[idx] = rec; else arr.push(rec);
+  return rec;
+}
+
+app.post('/api/record', async (req, res) => {
+  const { collection, record } = req.body || {};
+  if (!LIST_KEYS.includes(collection)) return res.status(400).json({ ok: false, error: 'coleção inválida' });
+  if (!record || typeof record !== 'object') return res.status(400).json({ ok: false, error: 'record ausente' });
+
+  const col = await getCol();
+  // Modo arquivo: read-modify-write SÍNCRONO = atômico dentro do event loop.
+  if (!col) {
+    try {
+      let data; try { data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch { data = {}; }
+      backupToFile(data);
+      const rec = applyUpsert(data, collection, record);
+      data._rev = (data._rev || 0) + 1;
+      fs.writeFileSync(DB_FILE, JSON.stringify(data), 'utf8');
+      return res.json({ ok: true, record: rec, _rev: data._rev });
+    } catch (err) { return res.status(500).json({ ok: false, error: err.message }); }
+  }
+  // Modo Mongo: CAS com retry (igual ao POST /api/db).
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const current = await col.findOne({ _id: 'main' });
+      const data = current ? (() => { const { _id, ...d } = current; return d; })() : {};
+      const serverRev = data._rev || 0;
+      await backupToMongo(data);
+      const rec = applyUpsert(data, collection, record);
+      data._rev = serverRev + 1;
+      const result = await col.replaceOne(
+        { _id: 'main', $or: [{ _rev: serverRev }, { _rev: { $exists: false } }] },
+        { _id: 'main', ...data },
+        { upsert: !current }
+      );
+      if (result.modifiedCount > 0 || result.upsertedCount > 0) {
+        return res.json({ ok: true, record: rec, _rev: data._rev });
+      }
+    }
+    return res.status(409).json({ ok: false, error: 'Conflito de concorrência — tente novamente' });
+  } catch (err) { return res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/record/:collection/:id', async (req, res) => {
+  const { collection } = req.params;
+  const id = /^\d+$/.test(req.params.id) ? parseInt(req.params.id) : req.params.id;
+  if (!LIST_KEYS.includes(collection)) return res.status(400).json({ ok: false, error: 'coleção inválida' });
+
+  const col = await getCol();
+  if (!col) {
+    try {
+      let data; try { data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch { data = {}; }
+      backupToFile(data);
+      const arr = Array.isArray(data[collection]) ? data[collection] : [];
+      const before = arr.length;
+      data[collection] = arr.filter(x => x.id !== id);
+      const removed = before - data[collection].length;
+      data._rev = (data._rev || 0) + 1;
+      fs.writeFileSync(DB_FILE, JSON.stringify(data), 'utf8');
+      return res.json({ ok: true, removed, _rev: data._rev });
+    } catch (err) { return res.status(500).json({ ok: false, error: err.message }); }
+  }
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const current = await col.findOne({ _id: 'main' });
+      if (!current) return res.json({ ok: true, removed: 0, _rev: 0 });
+      const { _id, ...data } = current;
+      const serverRev = data._rev || 0;
+      await backupToMongo(data);
+      const arr = Array.isArray(data[collection]) ? data[collection] : [];
+      data[collection] = arr.filter(x => x.id !== id);
+      data._rev = serverRev + 1;
+      const result = await col.replaceOne(
+        { _id: 'main', $or: [{ _rev: serverRev }, { _rev: { $exists: false } }] },
+        { _id: 'main', ...data }
+      );
+      if (result.modifiedCount > 0) return res.json({ ok: true, _rev: data._rev });
+    }
+    return res.status(409).json({ ok: false, error: 'Conflito de concorrência — tente novamente' });
+  } catch (err) { return res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ── Webhook events ──────────────────────────────────────
 const EVENTS_FILE = path.join(__dirname, 'webhook-events.json');
 

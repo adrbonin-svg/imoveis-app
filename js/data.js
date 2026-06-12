@@ -372,6 +372,55 @@ function saveData() {
     .catch(() => {});
 }
 
+// ── Persistência GRANULAR (1 registro por operação) ─────────────────────────
+// Salva/exclui APENAS o registro alvo no servidor, sem reenviar o banco inteiro.
+// Isso impede que uma aba sobrescreva o trabalho de outra (causa dos sumiços).
+// O servidor garante o id único e devolve o registro final.
+//
+// saveRecord(coll, rec, {isNew}) → faz upsert; se isNew, o servidor reatribui id
+// em caso de colisão. Atualiza o objeto recebido (Object.assign) com o id final.
+async function saveRecord(collection, record, opts = {}) {
+  // Atualiza o cache local imediatamente (paint instantâneo).
+  try { localStorage.setItem('imoveis_db', JSON.stringify(_dbParaLocal(DB))); } catch {}
+  const payload = opts.isNew ? { ...record, _new: true } : record;
+  try {
+    const r = await fetch('/api/record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection, record: payload }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const resp = await r.json();
+    if (resp && resp.ok) {
+      if (typeof resp._rev === 'number') { _dbRev = resp._rev; _persistRev(_dbRev); }
+      if (resp.record && resp.record.id != null && resp.record.id !== record.id) {
+        record.id = resp.record.id;   // servidor reatribuiu id (colisão) → reconcilia
+      }
+      return resp.record || record;
+    }
+    throw new Error(resp && resp.error || 'falha ao salvar');
+  } catch (e) {
+    // Fallback: se o endpoint granular falhar, cai no save completo (já protegido por _rev).
+    console.warn('[saveRecord] fallback p/ saveData:', e.message);
+    saveData();
+    return record;
+  }
+}
+
+async function deleteRecord(collection, id) {
+  try { localStorage.setItem('imoveis_db', JSON.stringify(_dbParaLocal(DB))); } catch {}
+  try {
+    const r = await fetch(`/api/record/${collection}/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const resp = await r.json();
+    if (resp && resp.ok && typeof resp._rev === 'number') { _dbRev = resp._rev; _persistRev(_dbRev); }
+    return resp;
+  } catch (e) {
+    console.warn('[deleteRecord] fallback p/ saveData:', e.message);
+    saveData();
+  }
+}
+
 // Persiste a versão sincronizada para detectar mudanças entre recarregamentos.
 function _persistRev(rev) {
   try { localStorage.setItem('imoveis_db_rev', String(rev)); } catch {}

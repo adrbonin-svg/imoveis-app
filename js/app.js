@@ -1713,7 +1713,7 @@ function openInquilino(id = null) {
   modal.classList.add('open');
 }
 
-function saveInquilino() {
+async function saveInquilino() {
   const form = document.getElementById('form-inquilino');
   const id   = form.dataset.id ? parseInt(form.dataset.id) : null;
   const data = {
@@ -1765,30 +1765,33 @@ function saveInquilino() {
     const idx = DB.inquilinos.findIndex(x => x.id === id);
     const antes = { ...DB.inquilinos[idx] };
     DB.inquilinos[idx] = { ...DB.inquilinos[idx], ...data };
+    await saveRecord('inquilinos', DB.inquilinos[idx]);
     _auditLog('editar', 'inquilino', id, data.nome, antes, DB.inquilinos[idx]);
   } else {
-    DB.inquilinos.push({ id: nextId(DB.inquilinos), empresaId: _currentEmpresaId(), ...data });
+    const novoInq = { id: nextId(DB.inquilinos), empresaId: _currentEmpresaId(), ...data };
+    DB.inquilinos.push(novoInq);
+    await saveRecord('inquilinos', novoInq, { isNew: true }); // servidor garante id único
     // Auto-criar acesso para o inquilino (CPF como login e senha)
-    const novoInq  = DB.inquilinos[DB.inquilinos.length - 1];
     const jaExiste = DB.usuarios.find(u => u.usuario === cpfLimpo && u.perfil === 'inquilino');
     if (cpfLimpo && !jaExiste) {
-      DB.usuarios.push({
+      const novoUser = {
         id:          nextId(DB.usuarios),
         empresaId:   _currentEmpresaId(),
         nome:        data.nome,
         usuario:     cpfLimpo,
         senha:       cpfLimpo,
         perfil:      'inquilino',
-        inquilinoId: novoInq.id,
+        inquilinoId: novoInq.id,   // id já reconciliado pelo await acima
         permissoes:  { portal: { ver: true } },
         ativo:       true,
-      });
+      };
+      DB.usuarios.push(novoUser);
+      await saveRecord('usuarios', novoUser, { isNew: true });
       // Envia e-mail de boas-vindas com credenciais (em background)
       if (data.email) notificarAcessoCriado(novoInq.id, cpfLimpo, cpfLimpo);
     }
     _auditLog('criar', 'inquilino', novoInq.id, data.nome, null, novoInq);
   }
-  saveData();
   closeModal('modal-inquilino');
   renderInquilinos();
   if (id) {
@@ -1800,20 +1803,27 @@ function saveInquilino() {
   }
 }
 
-function deleteInquilino(id) {
+async function deleteInquilino(id) {
   if (!confirm_('Excluir este inquilino?')) return;
   const inq = DB.inquilinos.find(x => x.id === id);
   _auditLog('excluir', 'inquilino', id, inq?.nome || String(id), inq, null);
   // Encerra contratos ATIVO vinculados a este inquilino
+  const contratosAlterados = [];
   DB.contratos.forEach(c => {
     if ((Number(c.inquilinoId) === Number(id) || (inq && c.inquilino === inq.nome)) && c.status === 'ATIVO') {
       c.status = 'ENCERRADO';
+      contratosAlterados.push(c);
     }
   });
+  const usuariosRemover = DB.usuarios.filter(u => u.perfil === 'inquilino' && Number(u.inquilinoId) === Number(id));
   DB.inquilinos = DB.inquilinos.filter(x => x.id !== id);
   DB.usuarios   = DB.usuarios.filter(u => !(u.perfil === 'inquilino' && Number(u.inquilinoId) === Number(id)));
-  _syncAllImoveisStatus();
-  saveData();
+  const imoveisAlterados = _syncAllImoveisStatus();
+  // Persistência granular (não reenviar o banco inteiro)
+  await deleteRecord('inquilinos', id);
+  for (const u of usuariosRemover)   await deleteRecord('usuarios', u.id);
+  for (const c of contratosAlterados) await saveRecord('contratos', c);
+  _persistImoveis(imoveisAlterados);
   renderInquilinos();
   renderImoveis();
   renderContratos();
@@ -2414,12 +2424,15 @@ function _syncImovelStatus(nomeImovel) {
     c.status === 'ATIVO' &&
     (!c.dataTermino || c.dataTermino >= todayStr)
   );
-  imo.status = temAtivo ? 'OCUPADO' : 'DISPONÍVEL';
+  const novoStatus = temAtivo ? 'OCUPADO' : 'DISPONÍVEL';
+  if (imo.status !== novoStatus) { imo.status = novoStatus; return imo; } // alterado
+  return null;
 }
 
 // Sincroniza todos os imóveis — chamado no carregamento e no dashboard
 function _syncAllImoveisStatus() {
   const todayStr = today();
+  const alterados = [];
   _myData(DB.imoveis).forEach(imo => {
     if (imo.status === 'EM MANUTENÇÃO') return;
     const temAtivo = _myData(DB.contratos).some(c =>
@@ -2427,8 +2440,29 @@ function _syncAllImoveisStatus() {
       c.status === 'ATIVO' &&
       (!c.dataTermino || c.dataTermino >= todayStr)
     );
-    imo.status = temAtivo ? 'OCUPADO' : 'DISPONÍVEL';
+    const novoStatus = temAtivo ? 'OCUPADO' : 'DISPONÍVEL';
+    if (imo.status !== novoStatus) { imo.status = novoStatus; alterados.push(imo); }
   });
+  return alterados; // imóveis cujo status mudou → persistir granularmente
+}
+
+// Persiste granularmente uma lista de imóveis alterados (sem reenviar o banco).
+function _persistImoveis(lista) {
+  if (typeof saveRecord !== 'function') return;
+  (lista || []).filter(Boolean).forEach(imo => saveRecord('imoveis', imo));
+}
+
+// Sincroniza no servidor (granular) os registros de uma coleção comparando com um
+// snapshot de ids anterior: upsert dos novos/atualizados, delete dos que sumiram.
+// Evita reenviar o banco inteiro — base da prevenção de perda de dados.
+async function _syncColecaoGranular(collection, idsAntes, registrosAgora) {
+  const idsAgora = new Set(registrosAgora.map(r => r.id));
+  for (const r of registrosAgora) {
+    await saveRecord(collection, r, { isNew: !idsAntes.has(r.id) });
+  }
+  for (const oldId of idsAntes) {
+    if (!idsAgora.has(oldId)) await deleteRecord(collection, oldId);
+  }
 }
 
 function preencherValoresImovel(sel) {
@@ -2826,7 +2860,7 @@ function clearFileZone() {
   updateFileZone(null);
 }
 
-function saveContrato() {
+async function saveContrato() {
   const form = document.getElementById('form-contrato');
   const id = form.dataset.id ? parseInt(form.dataset.id) : null;
   const selVal = form.inquilino.value;
@@ -2837,6 +2871,9 @@ function saveContrato() {
   const inqObj   = inqId   ? DB.inquilinos.find(i => i.id === inqId) : null;
   // Fallback: preserva vínculo existente se nenhum inquilino foi selecionado
   const existing = id ? DB.contratos.find(x => x.id === id) : null;
+  // Snapshot p/ persistência granular: ids das parcelas deste contrato ANTES das mutações
+  const _codAlvo = existing?.codigo || form.codigo.value.trim();
+  const _finIdsAntes = new Set(DB.financeiro.filter(f => f.contrato === _codAlvo).map(f => f.id));
   const resolvedNome = inqObj?.nome
     || (isGhost ? ghostOpt.dataset.ghostNome : null)
     || existing?.inquilino
@@ -2894,8 +2931,9 @@ function saveContrato() {
     _auditLog('criar', 'contrato', novoCt.id, data.codigo, null, novoCt);
   }
   // Atualiza status dos imóveis envolvidos
-  _syncImovelStatus(data.imovel);
-  if (oldImovel && oldImovel !== data.imovel) _syncImovelStatus(oldImovel);
+  const _imoveisAlterados = [];
+  _imoveisAlterados.push(_syncImovelStatus(data.imovel));
+  if (oldImovel && oldImovel !== data.imovel) _imoveisAlterados.push(_syncImovelStatus(oldImovel));
 
   // Gera parcelas e caução automáticas
   let qtdParcelas = 0;
@@ -2919,7 +2957,14 @@ function saveContrato() {
     }
   }
 
-  saveData();
+  // ── Persistência GRANULAR (sem reenviar o banco inteiro) ──
+  const ctSalvo = id ? DB.contratos.find(x => x.id === id) : DB.contratos[DB.contratos.length - 1];
+  await saveRecord('contratos', ctSalvo, { isNew: !id });
+  // Parcelas/caução do contrato: upsert das novas/atualizadas + delete das removidas
+  const _finAgora = DB.financeiro.filter(f => f.contrato === ctSalvo.codigo);
+  await _syncColecaoGranular('financeiro', _finIdsAntes, _finAgora);
+  _persistImoveis(_imoveisAlterados);
+
   closeModal('modal-contrato');
   renderContratos();
   renderImoveis();
@@ -3120,14 +3165,18 @@ async function deleteContrato(id) {
   }
 
   // 2) Remover parcelas pendentes do financeiro local (mantem as pagas)
+  const parcelasRemovidasIds = parcelasPendentes.map(p => p.id);
   DB.financeiro = DB.financeiro.filter(f =>
     !(f.contrato === ct.codigo && (f.valorRecebido || 0) === 0)
   );
 
   // 3) Remover o contrato
   DB.contratos = DB.contratos.filter(x => x.id !== id);
-  _syncImovelStatus(nomeImovel);
-  saveData();
+  const imovelAlterado = _syncImovelStatus(nomeImovel);
+  // Persistência granular (sem reenviar o banco)
+  await deleteRecord('contratos', id);
+  for (const pid of parcelasRemovidasIds) await deleteRecord('financeiro', pid);
+  _persistImoveis([imovelAlterado]);
   renderContratos();
   renderImoveis();
   if (typeof renderFinanceiro === 'function') renderFinanceiro();
@@ -3957,7 +4006,7 @@ function openFinanceiro(id = null) {
   modal.classList.add('open');
 }
 
-function saveFinanceiro() {
+async function saveFinanceiro() {
   const form = document.getElementById('form-financeiro');
   const id   = form.dataset.id ? parseInt(form.dataset.id) : null;
   const num  = n => parseFloat(form[n]?.value) || 0;
@@ -3997,21 +4046,26 @@ function saveFinanceiro() {
   };
   if (_finComprovantePendente) data.comprovante = _finComprovantePendente;
   if (!data.dataPagamento || !data.contrato) { toast('Data e contrato são obrigatórios', 'error'); return; }
+  let registroSalvo;
   if (id) {
     const idx = DB.financeiro.findIndex(x => x.id === id);
     const antes = { ...DB.financeiro[idx] };
     if (!data.comprovante && DB.financeiro[idx].comprovante) data.comprovante = DB.financeiro[idx].comprovante;
     DB.financeiro[idx] = { ...DB.financeiro[idx], ...data };
+    registroSalvo = DB.financeiro[idx];
+    await saveRecord('financeiro', registroSalvo);
     _auditLog('editar', 'financeiro', id, data.contrato, antes, DB.financeiro[idx]);
   } else {
-    DB.financeiro.push({ id: nextId(DB.financeiro), empresaId: _currentEmpresaId(), ...data });
-    const novoFin = DB.financeiro[DB.financeiro.length - 1];
+    const novoFin = { id: nextId(DB.financeiro), empresaId: _currentEmpresaId(), ...data };
+    DB.financeiro.push(novoFin);
+    await saveRecord('financeiro', novoFin, { isNew: true });
+    registroSalvo = novoFin;
     _auditLog('criar', 'financeiro', novoFin.id, data.contrato, null, novoFin);
   }
 
   // Propagação automática: ao salvar leituraAtual, atualiza leituraAnterior do próximo mês do mesmo inquilino
   if ((data.leituraAtual || 0) > 0 && data.inquilino) {
-    const savedId = id || DB.financeiro[DB.financeiro.length - 1]?.id;
+    const savedId = registroSalvo.id;
     const proximo = _myData(DB.financeiro)
       .filter(f =>
         f.inquilino === data.inquilino &&
@@ -4023,11 +4077,13 @@ function saveFinanceiro() {
       .sort((a, b) => a.dataPagamento.localeCompare(b.dataPagamento))[0];
     if (proximo) {
       const pIdx = DB.financeiro.findIndex(x => x.id === proximo.id);
-      if (pIdx >= 0) DB.financeiro[pIdx].leituraAnterior = data.leituraAtual;
+      if (pIdx >= 0) {
+        DB.financeiro[pIdx].leituraAnterior = data.leituraAtual;
+        await saveRecord('financeiro', DB.financeiro[pIdx]);
+      }
     }
   }
 
-  saveData();
   closeModal('modal-financeiro');
   renderFinanceiro();
   renderDashboard();
@@ -4040,12 +4096,12 @@ function saveFinanceiro() {
   }
 }
 
-function deleteFinanceiro(id) {
+async function deleteFinanceiro(id) {
   if (!confirm_('Excluir este registro?')) return;
   const fin = DB.financeiro.find(x => x.id === id);
   _auditLog('excluir', 'financeiro', id, fin?.contrato || String(id), fin, null);
   DB.financeiro = DB.financeiro.filter(x => x.id !== id);
-  saveData();
+  await deleteRecord('financeiro', id);
   renderFinanceiro();
   renderDashboard();
   toast('Registro excluído');
@@ -4130,7 +4186,7 @@ function handleBaixaFile(input) {
   input.value = '';
 }
 
-function salvarBaixa() {
+async function salvarBaixa() {
   if (!_baixaFinId) return;
   const form           = document.getElementById('form-baixa');
   const dataBaixa      = form.elements['dataBaixa'].value;
@@ -4154,7 +4210,7 @@ function salvarBaixa() {
     baixaManual:  true,
   };
   _auditLog('editar', 'financeiro', _baixaFinId, f.contrato, antesBaixa, DB.financeiro[idx]);
-  saveData();
+  await saveRecord('financeiro', DB.financeiro[idx]);
   closeModal('modal-baixa');
   renderFinanceiro();
   renderDashboard();
@@ -5454,7 +5510,7 @@ async function gerarBoleto(finId) {
       boletoLinha:     lineRes.data?.identificationField || '',
       boletoPdfUrl:    pdfRes.data?.bankSlipUrl || payRes.payment.bankSlipUrl || '',
     };
-    saveData();
+    await saveRecord('financeiro', DB.financeiro[idx]);
     renderFinanceiro();
     renderDashboard();
 
@@ -7185,6 +7241,9 @@ function _auditLog(acao, entidade, entidadeId, entidadeNome, dadosAntes, dadosDe
     dadosDepois:  _sanitizeAudit(dadosDepois),
   });
   if (DB.auditoria.length > 500) DB.auditoria.length = 500;
+  // Persiste só o registro novo (granular), sem reenviar o banco inteiro.
+  if (typeof saveRecord === 'function') saveRecord('auditoria', DB.auditoria[0], { isNew: true });
+  return DB.auditoria[0];
 }
 
 function _auditColecao(entidade) {
