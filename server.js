@@ -342,10 +342,17 @@ function reqAsaasKey(req) { return req.headers['x-asaas-key'] || cfg.key; }
 function reqAsaasEnv(req) { return req.headers['x-asaas-env'] || cfg.env; }
 
 async function asaasRequest(method, endpoint, body, overKey, overEnv) {
-  const key  = overKey  || cfg.key;
-  const base = (overEnv || cfg.env) === 'production'
+  const env  = overEnv || cfg.env;
+  const key  = overKey || cfg.key;
+  const base = env === 'production'
     ? 'https://api.asaas.com/v3'
     : 'https://api-sandbox.asaas.com/v3';
+
+  // Sem chave configurada: erro claro em vez de "Unexpected end of JSON input"
+  if (!key || !key.trim()) {
+    throw new Error(`Asaas sem chave API configurada (ambiente: ${env}). Configure em Configurações > Asaas.`);
+  }
+
   const res = await fetch(`${base}${endpoint}`, {
     method,
     headers: {
@@ -355,7 +362,30 @@ async function asaasRequest(method, endpoint, body, overKey, overEnv) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return res.json();
+
+  // Lê como texto primeiro para tolerar corpo vazio / não-JSON (401, 502, rate limit)
+  const raw = await res.text();
+  if (!raw) {
+    if (!res.ok) {
+      throw new Error(`Asaas ${res.status} ${res.statusText} (resposta vazia) — ${method} ${endpoint}`);
+    }
+    return {}; // 200 sem corpo (ex.: DELETE)
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error(`Asaas ${res.status}: resposta não-JSON — ${raw.slice(0, 200)}`);
+  }
+
+  // Erro de negócio do Asaas (ex.: pagamento inexistente, chave de outro ambiente)
+  if (!res.ok) {
+    const msg = data?.errors?.[0]?.description || `${res.status} ${res.statusText}`;
+    throw new Error(`Asaas ${res.status}: ${msg}`);
+  }
+
+  return data;
 }
 
 // Lê config Asaas de uma empresa específica (para PDF redirect)
@@ -365,6 +395,20 @@ async function getEmpresaAsaasConfig(empresaId) {
     const doc = col ? await col.findOne({ _id: 'main' }) : null;
     const data = doc || JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
     const emp = data?.empresas?.find(e => e.id === empresaId);
+    return emp?.asaasConfig || null;
+  } catch { return null; }
+}
+
+// Descobre a config Asaas da empresa dona de um pagamento Asaas (fallback quando
+// o link não traz ?eid=). Varre o financeiro procurando o asaasPaymentId.
+async function getAsaasConfigByPaymentId(paymentId) {
+  try {
+    const col = await getCol();
+    const doc = col ? await col.findOne({ _id: 'main' }) : null;
+    const data = doc || JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    const fin = (data?.financeiro || []).find(f => f.asaasPaymentId === paymentId);
+    if (fin?.empresaId == null) return null;
+    const emp = data?.empresas?.find(e => e.id === fin.empresaId);
     return emp?.asaasConfig || null;
   } catch { return null; }
 }
@@ -556,29 +600,55 @@ app.get('/api/asaas/payment/:id/pdf', async (req, res) => {
   try {
     let key = reqAsaasKey(req);
     let env = reqAsaasEnv(req);
-    const eid = req.query.eid ? parseInt(req.query.eid) : null;
-    if (eid) {
-      const empCfg = await getEmpresaAsaasConfig(eid);
-      if (empCfg?.apiKey) { key = empCfg.apiKey; env = empCfg.env || cfg.env; }
+
+    // 1) Tenta pela empresa informada na query (?eid=)
+    const eidRaw = req.query.eid;
+    const eid = (eidRaw && eidRaw !== 'undefined' && eidRaw !== 'null') ? parseInt(eidRaw) : null;
+    let empCfg = (eid && !Number.isNaN(eid)) ? await getEmpresaAsaasConfig(eid) : null;
+
+    // 2) Fallback: descobre a empresa dona do pagamento pelo próprio DB
+    if (!empCfg?.apiKey) {
+      empCfg = await getAsaasConfigByPaymentId(req.params.id);
+    }
+    if (empCfg?.apiKey) { key = empCfg.apiKey; env = empCfg.env || env; }
+
+    if (!key || !key.trim()) {
+      return res.status(400).send(_boletoErrHtml(
+        'Configuração Asaas não encontrada',
+        'Não foi possível identificar a chave Asaas da empresa deste boleto. Confirme em <b>Configurações → Asaas</b> se a chave da empresa está salva.'
+      ));
     }
 
     const payment = await asaasRequest('GET', `/payments/${req.params.id}`, null, key, env);
     const pdfUrl = payment.bankSlipUrl;
 
     if (!pdfUrl) {
-      return res.status(404).send(`
-        <h3>PDF do boleto ainda não disponível</h3>
-        <p>O Asaas pode levar alguns minutos para gerar o PDF após a criação do boleto.</p>
-        <p>Aguarde 1-2 minutos e tente novamente.</p>
-        <button onclick="window.close()">Fechar</button>
-      `);
+      return res.status(404).send(_boletoErrHtml(
+        'PDF do boleto ainda não disponível',
+        'O Asaas pode levar alguns minutos para gerar o PDF após a criação do boleto. Aguarde 1-2 minutos e tente novamente.'
+      ));
     }
 
     res.redirect(pdfUrl);
   } catch (err) {
-    res.status(500).send(`Erro ao buscar boleto: ${err.message}`);
+    res.status(500).send(_boletoErrHtml('Erro ao buscar boleto', err.message));
   }
 });
+
+// HTML amigável para erros de boleto (em vez de texto cru no navegador)
+function _boletoErrHtml(titulo, msg) {
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>${titulo}</title></head>
+    <body style="font-family:system-ui,Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px">
+      <div style="max-width:480px;background:#1e293b;border:1px solid #334155;border-radius:14px;padding:28px;text-align:center">
+        <div style="font-size:42px;margin-bottom:10px">🏦</div>
+        <h2 style="margin:0 0 10px;color:#f87171;font-size:18px">${titulo}</h2>
+        <p style="margin:0 0 20px;font-size:14px;line-height:1.5;color:#cbd5e1">${msg}</p>
+        <button onclick="history.back()" style="background:#2563eb;color:#fff;border:0;padding:11px 22px;border-radius:8px;font-weight:600;cursor:pointer">Voltar</button>
+      </div>
+    </body></html>`;
+}
 
 // ── E-mail: configuração ────────────────────────────────
 app.get('/api/email/config', (req, res) => {

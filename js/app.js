@@ -5600,7 +5600,7 @@ function enviarBoletoWhatsappDireto(finId) {
   texto += _discriminacaoPagamentoWhats(f);
   texto += `\n💰 *Total a pagar: ${fmt(f.totalGeral || f.valorContrato)}*\n`;
   if (f.boletoLinha) texto += `\nLinha digitável:\n${f.boletoLinha}\n`;
-  if (f.asaasPaymentId) texto += `\nPDF do boleto:\n${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf`;
+  if (f.asaasPaymentId) texto += `\nPDF do boleto:\n${window.location.origin}/api/asaas/payment/${f.asaasPaymentId}/pdf?eid=${f.empresaId || _currentEmpresaId() || ''}`;
   texto += _textoAcessoInquilino(inq?.id);
   window.open(`https://wa.me/55${fone}?text=${encodeURIComponent(texto)}`, '_blank');
 }
@@ -7088,7 +7088,7 @@ function _portalRenderBoletos(inq) {
       || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
 
     const boletoBtn = f.asaasPaymentId && !pago && !['CANCELED'].includes(f.asaasStatus)
-      ? `<a href="/api/asaas/payment/${f.asaasPaymentId}/pdf" target="_blank" class="btn btn-primary btn-sm">🏦 Ver Boleto</a>`
+      ? `<a href="/api/asaas/payment/${f.asaasPaymentId}/pdf?eid=${f.empresaId || ''}" target="_blank" class="btn btn-primary btn-sm">🏦 Ver Boleto</a>`
       : '';
 
     const isCaucao = f.tipo === 'caucao';
