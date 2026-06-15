@@ -1172,7 +1172,7 @@ app.post('/api/alertas/testar', async (req, res) => {
 
 // ── Inicia servidor ─────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
   const url = `http://localhost:${PORT}`;
   console.log('\n╔══════════════════════════════════════════════╗');
   console.log('║   🏢 Sistema de Gestão de Imóveis           ║');
