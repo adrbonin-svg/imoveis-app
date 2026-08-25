@@ -1,5 +1,13 @@
 // ── VERSÃO DO SISTEMA ──────────────────────────────────────
-const APP_VERSION = '2026.05.27-v57';
+const APP_VERSION = '2026.07.13-v59';
+// ────────────────────────────────────────────────────────────
+
+// ── TOLERÂNCIA FINANCEIRA ───────────────────────────────────
+// Evita falso-PARCIAL por resíduo de ponto flutuante (ex.: 813,20+75,00+276,12
+// = 1164.3200000000002 vs valorRecebido 1164.32 do Asaas). Compara em centavos
+// inteiros: o recebido "cobre" o total quando os dois arredondam ao mesmo centavo.
+const _finCobre   = (rec, tot) => Math.round((rec || 0) * 100) >= Math.round((tot || 0) * 100);
+const _finParcial = (rec, tot) => (rec || 0) > 0 && !_finCobre(rec, tot);
 // ────────────────────────────────────────────────────────────
 
 // ── MODELO PADRÃO DE CONTRATO (usado por resetModeloContrato) ──────────────
@@ -964,7 +972,7 @@ function renderDashboard() {
   // Mesma lógica da aba Financeira: pago = baixaManual COM valor integral OU Asaas confirmado
   // Pagamento parcial (baixaManual + valorRecebido < totalGeral) continua como PENDENTE
   const _finPago = f =>
-    (f.baixaManual && (f.valorRecebido || 0) >= (f.totalGeral || f.valorContrato || 1))
+    (f.baixaManual && _finCobre(f.valorRecebido, f.totalGeral || f.valorContrato || 1))
     || f.asaasStatus === 'RECEIVED'
     || f.asaasStatus === 'CONFIRMED';
 
@@ -1348,10 +1356,10 @@ function _aplicarSort(list, page) {
   if (!s) return list;
   return [...list].sort((a, b) => {
     let va = s.col === '_encargos' ? (a.valorMulta||0)+(a.valorMora||0)
-           : s.col === '_statusPag' ? (a.baixaManual && (a.valorRecebido||0) >= (a.totalGeral||0) ? 'PAGO' : a.baixaManual ? 'PARCIAL' : 'PENDENTE')
+           : s.col === '_statusPag' ? (a.baixaManual && _finCobre(a.valorRecebido, a.totalGeral) ? 'PAGO' : a.baixaManual ? 'PARCIAL' : 'PENDENTE')
            : a[s.col] ?? '';
     let vb = s.col === '_encargos' ? (b.valorMulta||0)+(b.valorMora||0)
-           : s.col === '_statusPag' ? (b.baixaManual && (b.valorRecebido||0) >= (b.totalGeral||0) ? 'PAGO' : b.baixaManual ? 'PARCIAL' : 'PENDENTE')
+           : s.col === '_statusPag' ? (b.baixaManual && _finCobre(b.valorRecebido, b.totalGeral) ? 'PAGO' : b.baixaManual ? 'PARCIAL' : 'PENDENTE')
            : b[s.col] ?? '';
     const na = parseFloat(va), nb = parseFloat(vb);
     if (!isNaN(na) && !isNaN(nb)) return s.dir === 'asc' ? na - nb : nb - na;
@@ -2598,6 +2606,15 @@ function renderContratos() {
              ${caucaoParc ? `<div style="font-size:11px;color:var(--gray-400)">${caucaoParc}</div>` : ''}
              ${caucaoForma ? `<div style="font-size:11px;color:var(--gray-500)">💳 ${caucaoForma}</div>` : ''}`
           : `<span style="color:var(--gray-300);font-size:12px">—</span>`;
+        // Selos de vistoria (fotos que entram no PDF) e de assinatura eletrônica
+        const _ckC = _vistoriaDoContrato(c);
+        const _nFotos = _ckC ? (_ckC.items || []).filter(it => it.fotoData).length : 0;
+        const vistoriaSelo = _nFotos > 0
+          ? `<span class="badge badge-blue" style="margin-left:6px" title="Vistoria com ${_nFotos} foto(s) — anexada no PDF ao Gerar o contrato">📷 ${_nFotos} vistoria</span>`
+          : `<span class="badge badge-yellow" style="margin-left:6px" title="Nenhuma foto de vistoria — o contrato sairá sem anexo">⚠️ sem vistoria</span>`;
+        const assinaturaSelo = c.assinadoEm
+          ? `<span class="badge badge-green" style="margin-left:6px" title="Contrato + vistoria assinados eletronicamente${c.assinaturaHash ? ' · hash ' + String(c.assinaturaHash).slice(0,12) + '…' : ''}">✅ Assinado ${fmtDate(c.assinadoEm)}</span>`
+          : '';
         return `
         <tr>
           <td>
@@ -2610,6 +2627,7 @@ function renderContratos() {
             ${c.renovacoes > 0
               ? `<span class="badge badge-blue" style="margin-left:6px" title="${c.renovacoes}ª renovação">🔄 ${c.renovacoes}x</span>`
               : ''}
+            <div style="margin-top:4px">${vistoriaSelo}${assinaturaSelo}</div>
           </td>
           <td>${fmtDate(c.dataInicio)}</td>
           <td>${alerta ? `<span class="badge badge-yellow">${fmtDate(c.dataTermino)} ⚠️</span>` : fmtDate(c.dataTermino)}</td>
@@ -2620,6 +2638,7 @@ function renderContratos() {
           <td>
             <div class="actions">
               <button class="btn btn-ghost btn-sm" onclick="gerarContrato(${c.id})">📄 Gerar</button>
+              <button class="btn btn-ghost btn-sm" onclick="enviarContratoParaAssinar(${c.id})" title="Enviar por e-mail o convite para o inquilino assinar (contrato + vistoria)">📤 Enviar p/ assinar</button>
               <button class="btn btn-ghost btn-sm" style="color:#25D366" onclick="enviarContratoWhatsapp(${c.id})" title="Enviar contrato via WhatsApp">📱 WhatsApp</button>
               ${_podeAcao('contratos','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openContrato(${c.id})">Editar</button>` : ''}
               ${_podeAcao('contratos','excluir') ? `<button class="btn btn-danger btn-sm" onclick="deleteContrato(${c.id})">Excluir</button>` : ''}
@@ -3193,6 +3212,48 @@ async function deleteContrato(id) {
   }
 }
 
+// ── VISTORIA VINCULADA AO CONTRATO ─────────────────────
+// Localiza o checklist de vistoria do inquilino/imóvel do contrato.
+// Regra: filtra pelos do imóvel do contrato; se nenhum casar, cai pra todos
+// do inquilino; devolve sempre o mais RECENTE por vinculadoEm.
+function _vistoriaDoContrato(c) {
+  if (!c) return null;
+  const normNome = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const inq = (c.inquilinoId ? DB.inquilinos.find(i => Number(i.id) === Number(c.inquilinoId)) : null)
+           || DB.inquilinos.find(i => normNome(i.nome) === normNome(c.inquilino));
+  // 1) Preferência: vistoria já vinculada ao inquilino (é a que vai ao Portal p/ assinar)
+  if (inq && Array.isArray(inq.checklistFotos) && inq.checklistFotos.length) {
+    const doImovel = inq.checklistFotos.filter(ck => normNome(ck.imovelNome) === normNome(c.imovel));
+    const lista = doImovel.length ? doImovel : inq.checklistFotos;
+    const escolhido = lista.slice().sort((a, b) => (b.vinculadoEm || '').localeCompare(a.vinculadoEm || ''))[0];
+    if (escolhido) return escolhido;
+  }
+  // 2) Fallback: checklist do próprio imóvel (ainda não vinculado ao inquilino)
+  const im = DB.imoveis.find(i => normNome(i.nome) === normNome(c.imovel));
+  if (im && Array.isArray(im.checklistFotos) && im.checklistFotos.some(it => it.fotoData)) {
+    return { tipo: im.checklistTipo || 'Vistoria', vinculadoEm: im.checklistData || '', imovelNome: im.nome, items: im.checklistFotos };
+  }
+  return null;
+}
+
+// Monta o bloco HTML "ANEXO I — Vistoria" para entrar no fim do PDF do contrato.
+// Cada item vira um card independente (page-break-inside:avoid) para o paginador
+// quebrar corretamente entre fotos. Só entra item que tem foto.
+function _anexoVistoriaHtml(ck) {
+  if (!ck) return '';
+  const itensComFoto = (ck.items || []).filter(it => it.fotoData);
+  if (!itensComFoto.length) return '';
+  const cab = `<p class="ct-anexo-break" style="font-weight:700;margin:16px 0 4px">ANEXO I — VISTORIA COM REGISTRO FOTOGRÁFICO</p>`
+    + `<p style="margin:4px 0">Tipo: ${_esc(ck.tipo || 'Vistoria')} · Data: ${fmtDate(ck.vinculadoEm)} · ${itensComFoto.length} registro(s) fotográfico(s), parte integrante deste contrato (Cláusula 28).</p>`;
+  const cards = itensComFoto.map(it => `
+    <div style="page-break-inside:avoid;margin:10px 0;border:1px solid #bbb;border-radius:6px;padding:8px">
+      <div style="font-weight:700;margin-bottom:6px">${_esc(it.item)}</div>
+      <img src="${it.fotoData}" style="max-width:100%;max-height:90mm;object-fit:contain;display:block;margin:0 auto">
+      ${it.obs ? `<div style="font-size:11px;color:#333;margin-top:6px">${_esc(it.obs)}</div>` : ''}
+    </div>`).join('');
+  return cab + cards;
+}
+
 function gerarContrato(id) {
   const c = DB.contratos.find(x => x.id === id);
   if (!c) return;
@@ -3387,10 +3448,22 @@ function gerarContrato(id) {
   ${inq.id ? `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="closeModal('modal-ct-preview');openInquilino(${inq.id})">✏ Editar cadastro do inquilino</button>` : ''}
 </div>`;
 
+  // Anexo de vistoria (fotos) — parte integrante do contrato (Cláusula 28)
+  const _ckVist = _vistoriaDoContrato(c);
+  const anexoVistoria = _anexoVistoriaHtml(_ckVist);
+
+  // Ordem correta: quando há anexo de fotos, o bloco de ASSINATURAS vai para
+  // DEPOIS das fotos — o inquilino assina por último, cobrindo contrato + vistoria.
+  let corpoHtml = html, assinaturaHtml = '';
+  if (anexoVistoria) {
+    const idxAss = html.search(/<p[^>]*>\s*ASSINATURAS/i);
+    if (idxAss >= 0) { corpoHtml = html.slice(0, idxAss); assinaturaHtml = html.slice(idxAss); }
+  }
+
   // Painel de diagnóstico é só para o admin — o inquilino vê apenas o contrato
   const _ehInquilino = (typeof _currentUser !== 'undefined' && _currentUser && _currentUser.perfil === 'inquilino');
   document.getElementById('preview-ct-title').textContent = `Contrato ${c.codigo} — ${c.imovel}`;
-  document.getElementById('modal-ct-preview-body').innerHTML = (_ehInquilino ? '' : inqInfoBar) + html;
+  document.getElementById('modal-ct-preview-body').innerHTML = (_ehInquilino ? '' : inqInfoBar) + corpoHtml + anexoVistoria + assinaturaHtml;
   document.getElementById('modal-ct-preview').classList.add('open');
 }
 
@@ -3422,6 +3495,8 @@ function _paginarContrato(html) {
   const flush = () => { if (current.childNodes.length) { pages.push(current.innerHTML); current = document.createElement('div'); } };
 
   for (const node of nodes) {
+    // Marcador de quebra forçada (ex.: início do Anexo de Vistoria) → nova folha
+    if (node.classList && node.classList.contains('ct-anexo-break')) flush();
     current.appendChild(node.cloneNode(true));
     meas.innerHTML = current.innerHTML;
     if (meas.scrollHeight > contentH && current.childNodes.length > 1) {
@@ -3680,6 +3755,11 @@ function renderFinanceiro() {
 
   let list = [..._myData(DB.financeiro)];
 
+  // Unidade/imóvel do locador: resolve pelo código do contrato (contrato.imovel)
+  const _mapUnidade = {};
+  _myData(DB.contratos).forEach(c => { if (c.codigo) _mapUnidade[c.codigo] = c.imovel || ''; });
+  list.forEach(f => { f._unidade = _mapUnidade[f.contrato] || ''; });
+
   // Filtro de período
   if (!todos) {
     list = list.filter(f => {
@@ -3693,7 +3773,8 @@ function renderFinanceiro() {
   if (search) {
     list = list.filter(f =>
       (f.contrato || '').toLowerCase().includes(search) ||
-      (f.inquilino || '').toLowerCase().includes(search)
+      (f.inquilino || '').toLowerCase().includes(search) ||
+      (f._unidade || '').toLowerCase().includes(search)
     );
   }
 
@@ -3704,8 +3785,8 @@ function renderFinanceiro() {
       const rec = f.valorRecebido || 0;
       const tot = f.totalGeral    || 0;
       if (statusPagFilter === 'PENDENTE') return !f.baixaManual && !(f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && tot > 0;
-      if (statusPagFilter === 'PAGO')     return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && rec >= tot && tot > 0;
-      if (statusPagFilter === 'PARCIAL')  return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && rec > 0 && rec < tot;
+      if (statusPagFilter === 'PAGO')     return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && _finCobre(rec, tot) && tot > 0;
+      if (statusPagFilter === 'PARCIAL')  return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && _finParcial(rec, tot);
       return true;
     });
   }
@@ -3714,6 +3795,7 @@ function renderFinanceiro() {
   const _finThead = document.getElementById('fin-thead');
   if (_finThead) _finThead.innerHTML = '<tr>' +
     _th('fin','dataPagamento','Vencimento') + _th('fin','contrato','Contrato') +
+    _th('fin','_unidade','Imóvel') +
     _th('fin','inquilino','Inquilino') + _th('fin','valorContrato','Vlr Contrato') +
     _th('fin','consumoAgua','Água') + _th('fin','totalEnergia','Energia') +
     _th('fin','_encargos','Encargos') + _th('fin','totalGeral','Total') +
@@ -3750,7 +3832,7 @@ function renderFinanceiro() {
 
   // Tabela
   document.getElementById('fin-tbody').innerHTML = list.length === 0
-    ? `<tr><td colspan="11"><div class="empty"><div class="empty-icon">💰</div><p>Nenhum pagamento em ${labelPeriodo}</p></div></td></tr>`
+    ? `<tr><td colspan="13"><div class="empty"><div class="empty-icon">💰</div><p>Nenhum pagamento em ${labelPeriodo}</p></div></td></tr>`
     : list.map(f => `
       <tr>
         <td>${fmtDate(f.dataPagamento)}</td>
@@ -3758,6 +3840,9 @@ function renderFinanceiro() {
           <strong><span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.contrato)},renderFinanceiro)" title="Filtrar por este contrato">${f.contrato}</span></strong>
           ${f.tipo === 'caucao' ? `<br><span class="badge badge-yellow" style="font-size:10px;margin-top:2px">🔒 ${f.observacoes || 'Caução'}</span>` : ''}
         </td>
+        <td>${f._unidade
+              ? `<span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f._unidade)},renderFinanceiro)" title="Filtrar por esta unidade">🏠 ${f._unidade}</span>`
+              : '<span style="color:var(--gray-400)">—</span>'}</td>
         <td>${f.inquilino ? `<span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.inquilino)},renderFinanceiro)" title="Filtrar por este inquilino">${f.inquilino}</span>` : '—'}</td>
         <td>${f.tipo === 'caucao' ? `<span style="color:var(--gray-400);font-size:11px">—</span>` : fmt(f.valorContrato)}</td>
         <td>${(f.consumoAgua || 0) > 0 ? fmt(f.consumoAgua) : '—'}</td>
@@ -3775,9 +3860,9 @@ function renderFinanceiro() {
           const rec = f.valorRecebido || 0;
           const tot = f.totalGeral    || 0;
           const pago = f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
-          if (pago && rec >= tot && tot > 0)  return '<span class="badge badge-green">PAGO</span>';
-          if (pago && rec > 0 && rec < tot)   return '<span class="badge badge-yellow">PARCIAL</span>';
-          if (!pago && tot > 0)               return '<span class="badge badge-red">PENDENTE</span>';
+          if (pago && _finCobre(rec, tot) && tot > 0)  return '<span class="badge badge-green">PAGO</span>';
+          if (pago && _finParcial(rec, tot))           return '<span class="badge badge-yellow">PARCIAL</span>';
+          if (!pago && tot > 0)                        return '<span class="badge badge-red">PENDENTE</span>';
           return '—';
         })()}</td>
         <td>${(() => {
@@ -5397,7 +5482,16 @@ async function gerarBoleto(finId) {
       if (_mes && _ano) _competencia = `${_MESES[parseInt(_mes, 10) - 1]}/${_ano}`;
     }
 
+    // Dados do imóvel / beneficiário / tipo — detalham o que está sendo pago
+    const _unidade  = contrato?.imovel || f.contrato;
+    const _ehCaucao = f.tipo === 'caucao';
+    // Rótulo: caução usa as observações ("Caução 1/2"); cobrança normal usa "Aluguel"
+    const _rotulo   = _ehCaucao ? (f.observacoes || 'Caução') : 'Aluguel';
+
+    linhasInst.push(`Beneficiario: ${_nomeLoc}`);
+    linhasInst.push(`Imovel/Unidade: ${_unidade}`);
     linhasInst.push(`Ref.: ${f.contrato} | Inquilino: ${f.inquilino || contrato?.inquilino || ''} | Venc.: ${fmtDate(f.dataPagamento)}`);
+    linhasInst.push(`Tipo de cobranca: ${_ehCaucao ? 'Caucao' : 'Aluguel'}`);
     if (_competencia) {
       linhasInst.push(`Competencia: ${_competencia}`);
       linhasObs.push(`Competencia: ${_competencia}`);
@@ -5434,6 +5528,11 @@ async function gerarBoleto(finId) {
       linhasObs.push(`Mora (${f.pctMora||0}% x ${f.diasAtraso||0} dias): R$ ${_fmt2(f.valorMora)}`);
       linhasInst.push(`Juros de mora (${f.pctMora||0}% ao mes, ${f.diasAtraso||0} dia(s)): R$ ${_fmt2(f.valorMora)}`);
     }
+    if (_ehCaucao) {
+      const _valCaucao = f.caucaoValor || f.totalGeral || 0;
+      linhasObs.push(`Valor da Caucao: R$ ${_fmt2(_valCaucao)}`);
+      linhasInst.push(`Valor da Caucao: R$ ${_fmt2(_valCaucao)}`);
+    }
 
     const _totalStr = `TOTAL A PAGAR: R$ ${_fmt2(f.totalGeral || f.valorContrato || 0)}`;
     linhasObs.push(_totalStr);
@@ -5447,12 +5546,7 @@ async function gerarBoleto(finId) {
     const observacoesBoleto  = linhasObs.join(' | ');
     const instrucoesBoleto   = linhasInst.join('\n');
 
-    // Nome da unidade (imóvel) — usado no lugar do código do contrato
-    const _unidade = contrato?.imovel || f.contrato;
-    const _ehCaucao = f.tipo === 'caucao';
-    // Rótulo: caução usa as observações ("Caução 1/2"); cobrança normal usa "Aluguel"
-    const _rotulo = _ehCaucao ? (f.observacoes || 'Caução') : 'Aluguel';
-
+    // _unidade, _ehCaucao e _rotulo já declarados acima (usados nas instruções)
     // Discriminação compacta dos valores para o description (único campo impresso pelo Asaas)
     let _discrimCurta = '';
     if (_ehCaucao) {
@@ -5921,15 +6015,15 @@ const REL_TIPOS = {
       if (s) l = l.filter(f => {
         const rec = f.valorRecebido||0, tot = f.totalGeral||0;
         if (s==='PENDENTE') return rec<=0 && tot>0;
-        if (s==='PAGO')     return rec>=tot && tot>0;
-        if (s==='PARCIAL')  return rec>0 && rec<tot;
+        if (s==='PAGO')     return _finCobre(rec, tot) && tot>0;
+        if (s==='PARCIAL')  return _finParcial(rec, tot);
         return true;
       });
       const busca = (document.getElementById('rf-fin-busca')?.value||'').toLowerCase();
       if (busca) l = l.filter(f => f.contrato.toLowerCase().includes(busca)||(f.inquilino||'').toLowerCase().includes(busca));
       return l.map(f => {
         const rec=f.valorRecebido||0, tot=f.totalGeral||0;
-        let status = rec<=0&&tot>0?'PENDENTE':rec>=tot&&tot>0?'PAGO':rec>0&&rec<tot?'PARCIAL':'—';
+        let status = rec<=0&&tot>0?'PENDENTE':_finCobre(rec,tot)&&tot>0?'PAGO':_finParcial(rec,tot)?'PARCIAL':'—';
         return [fmtDate(f.dataPagamento), f.contrato, f.inquilino||'—',
           _fmtN(f.valorContrato), _fmtN(f.consumoAgua), _fmtN(f.totalEnergia),
           _fmtN((f.valorMulta||0)+(f.valorMora||0)), _fmtN(f.totalGeral), _fmtN(f.valorRecebido), status];
@@ -6013,7 +6107,7 @@ const REL_TIPOS = {
         const parc = finList.filter(f => f.contrato === c.codigo);
         const totalC = parc.reduce((s,f) => s+(f.totalGeral||0), 0);
         const totalR = parc.reduce((s,f) => s+(f.valorRecebido||0), 0);
-        const pagas   = parc.filter(f => (f.valorRecebido||0)>=(f.totalGeral||0) && (f.totalGeral||0)>0).length;
+        const pagas   = parc.filter(f => _finCobre(f.valorRecebido, f.totalGeral) && (f.totalGeral||0)>0).length;
         const pend    = parc.filter(f => (f.valorRecebido||0)<=0 && (f.totalGeral||0)>0).length;
         return [c.codigo, c.imovel, c.inquilino||'—', c.status,
           _fmtN(totalC), _fmtN(totalR), _fmtN(totalC-totalR), parc.length, pagas, pend];
@@ -7020,6 +7114,66 @@ async function portalConfirmarChecklist(ckId, inqId) {
   toast('Vistoria assinada eletronicamente!', 'success');
 }
 
+// Assinatura CONJUNTA: contrato + vistoria num único ato (mesmo hash cobre os dois).
+// O conteúdo canônico inclui os termos do contrato E os itens da vistoria, para a
+// assinatura amparar juridicamente ambos (Cláusula 28: fotos = anexo integrante).
+async function portalAssinarContrato(contratoId, inqId) {
+  const c   = DB.contratos.find(x => Number(x.id) === Number(contratoId));
+  const inq = DB.inquilinos.find(x => Number(x.id) === Number(inqId));
+  if (!c || !inq) return;
+  const ck  = _vistoriaDoContrato(c);
+  const temVistoria = ck && (ck.items || []).some(it => it.fotoData);
+
+  const aviso = temVistoria
+    ? 'Ao confirmar, você declara ter lido e concordado com o CONTRATO e com a VISTORIA (fotos em anexo). Esta ação tem validade como assinatura eletrônica. Confirmar?'
+    : 'Ao confirmar, você declara ter lido e concordado com o CONTRATO. Esta ação tem validade como assinatura eletrônica. Confirmar?';
+  if (!confirm_(aviso)) return;
+
+  // Conteúdo canônico: termos do contrato + itens da vistoria
+  const conteudo = JSON.stringify({
+    contrato: {
+      codigo: c.codigo, imovel: c.imovel, inquilino: inq.nome, cpf: inq.cpf,
+      valorMensal: c.valorMensal, dataInicio: c.dataInicio, dataTermino: c.dataTermino,
+      caucao: c.caucao, diaVencimento: c.diaVencimento,
+    },
+    modeloTamanho: (DB.config.modeloContrato || '').length,
+    vistoria: temVistoria ? {
+      imovel: ck.imovelNome, tipo: ck.tipo, vinculadoEm: ck.vinculadoEm,
+      items: (ck.items || []).map(({ item, obs, foto }) => ({ item, obs, foto })),
+    } : null,
+  });
+
+  const [hash, servidor] = await Promise.all([
+    _sha256(conteudo),
+    fetch('/api/registrar-assinatura', { method: 'POST' }).then(r => r.json()).catch(() => ({})),
+  ]);
+  const quando = servidor.registradoEm || new Date().toISOString();
+
+  c.assinadoEm      = quando;
+  c.assinadoPor     = inq.nome;
+  c.assinaturaHash  = hash;
+  c.assinaturaIp    = servidor.ip     || 'não capturado';
+  c.assinaturaAgente = servidor.agente || navigator.userAgent;
+  await saveRecord('contratos', c);
+
+  // Mesmo ato carimba a vistoria vinculada (se estiver no inquilino)
+  if (temVistoria && Array.isArray(inq.checklistFotos)) {
+    const ckInq = inq.checklistFotos.find(x => String(x.id) === String(ck.id));
+    if (ckInq && !ckInq.confirmadoEm) {
+      ckInq.confirmadoEm = quando;
+      ckInq.confirmadoPor = inq.nome;
+      ckInq.assinaturaHash = hash;
+      ckInq.assinaturaIp = c.assinaturaIp;
+      ckInq.assinaturaAgente = c.assinaturaAgente;
+      saveData();
+    }
+  }
+
+  _portalRenderContratos(inq);
+  _portalRenderChecklists(inq);
+  toast(temVistoria ? 'Contrato + vistoria assinados eletronicamente!' : 'Contrato assinado eletronicamente!', 'success');
+}
+
 function _portalRenderContratos(inq) {
   const el = document.getElementById('portal-ct-lista');
   if (!el) return;
@@ -7076,6 +7230,13 @@ function _portalRenderContratos(inq) {
       </div>`;
     }
 
+    // Assinatura eletrônica conjunta (contrato + vistoria)
+    const _ckPortal = _vistoriaDoContrato(c);
+    const _temVist = _ckPortal && (_ckPortal.items || []).some(it => it.fotoData);
+    const assinaturaBtn = c.assinadoEm
+      ? `<span class="portal-badge-ok" title="Assinado eletronicamente${c.assinaturaHash ? ' · hash ' + String(c.assinaturaHash).slice(0,16) + '…' : ''}">✅ Assinado ${fmtDateHora(c.assinadoEm)}</span>`
+      : `<button class="btn btn-primary btn-sm" onclick="portalAssinarContrato(${c.id}, ${inq.id})">✍️ Assinar ${_temVist ? 'Contrato + Vistoria' : 'Contrato'}</button>`;
+
     return `
     <div class="portal-card">
       <div class="portal-card-head">
@@ -7083,11 +7244,12 @@ function _portalRenderContratos(inq) {
           <strong>${c.codigo} — ${c.imovel}</strong>
           <div style="font-size:12px;color:var(--gray-400);margin-top:2px">${fmtDate(c.dataInicio)} → ${fmtDate(c.dataTermino)}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span class="badge ${ativo ? 'badge-green' : 'badge-gray'}">${c.status}</span>
           <button class="btn btn-ghost btn-sm" onclick="gerarContrato(${c.id})">📄 Ver</button>
-          <button class="btn btn-primary btn-sm" onclick="imprimirContratoDireto(${c.id})">🖨️ Imprimir</button>
+          <button class="btn btn-ghost btn-sm" onclick="imprimirContratoDireto(${c.id})">🖨️ Imprimir</button>
           ${btnArquivo}
+          ${assinaturaBtn}
         </div>
       </div>
       <div style="font-size:12px;color:var(--gray-500);margin-bottom:6px">📄 Condições do contrato <span style="color:var(--gray-400)">(referência)</span></div>
@@ -7131,16 +7293,16 @@ function _portalRenderBoletos(inq) {
     const rec  = f.valorRecebido || 0;
     const tot  = f.totalGeral    || 0;
     const venc = f.dataPagamento || '';
-    const atrasado = venc < hoje && rec < tot;
+    const atrasado = venc < hoje && !_finCobre(rec, tot);
 
     let statusHtml;
-    if (rec >= tot && tot > 0)        statusHtml = `<span class="badge badge-green">✅ Pago</span>`;
+    if (_finCobre(rec, tot) && tot > 0) statusHtml = `<span class="badge badge-green">✅ Pago</span>`;
     else if (f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED')
                                        statusHtml = `<span class="badge badge-green">✅ Pago</span>`;
     else if (atrasado)                 statusHtml = `<span class="badge badge-red">⚠️ Vencido</span>`;
     else                               statusHtml = `<span class="badge badge-yellow">⏳ Pendente</span>`;
 
-    const pago = rec >= tot && tot > 0
+    const pago = (_finCobre(rec, tot) && tot > 0)
       || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
 
     const boletoBtn = f.asaasPaymentId && !pago && !['CANCELED'].includes(f.asaasStatus)
@@ -7151,7 +7313,7 @@ function _portalRenderBoletos(inq) {
 
     if (isCaucao) {
       return `
-      <div class="portal-card ${atrasado && rec < tot ? 'portal-card-atrasado' : ''}">
+      <div class="portal-card ${atrasado ? 'portal-card-atrasado' : ''}">
         <div class="portal-card-head">
           <div>
             <strong>${f.observacoes || 'Caução'}</strong>
@@ -7192,7 +7354,7 @@ function _portalRenderBoletos(inq) {
       : '';
 
     return `
-    <div class="portal-card ${atrasado && rec < tot ? 'portal-card-atrasado' : ''}">
+    <div class="portal-card ${atrasado ? 'portal-card-atrasado' : ''}">
       <div class="portal-card-head">
         <div>
           <strong>${titulo}</strong>
@@ -7459,6 +7621,24 @@ async function notificarAcessoCriado(inqId, usuario, senha) {
 async function notificarVistoria(inqId, nomeImovel) {
   const ok = await _enviarEmailInquilino('vistoria', inqId, { imovel: nomeImovel });
   if (ok) toast('E-mail de vistoria enviado!', 'success');
+}
+
+// Envia ao inquilino o convite para assinar o contrato (com vistoria em anexo,
+// quando houver) via e-mail + link do Portal.
+async function enviarContratoParaAssinar(id) {
+  const c = DB.contratos.find(x => Number(x.id) === Number(id));
+  if (!c) return;
+  const normNome = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const inqId = c.inquilinoId
+    || (DB.inquilinos.find(i => normNome(i.nome) === normNome(c.inquilino)) || {}).id;
+  if (!inqId) { toast('Inquilino do contrato não encontrado no cadastro', 'error'); return; }
+  const ck = _vistoriaDoContrato(c);
+  const temVistoria = !!(ck && (ck.items || []).some(it => it.fotoData));
+  if (!confirm_(`Enviar por e-mail ao inquilino o convite para assinar o contrato ${c.codigo}${temVistoria ? ' (com vistoria em anexo)' : ''}?`)) return;
+  const ok = await _enviarEmailInquilino('contratoVistoria', inqId, {
+    imovel: c.imovel, contrato: c.codigo, temVistoria,
+  });
+  if (ok) toast(`Convite de assinatura enviado ao inquilino${temVistoria ? ' (contrato + vistoria)' : ''}!`, 'success');
 }
 
 // Chamadas pelos botões da ficha do inquilino

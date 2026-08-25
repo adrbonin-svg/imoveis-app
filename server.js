@@ -153,6 +153,22 @@ const emailTemplates = {
         <p style="font-size:12px;color:#9ca3af">Acesse com seu CPF como usuário e senha.</p>
       </div>`,
   }),
+
+  contratoVistoria: ({ nome, imovel, contrato, temVistoria, appUrl }) => ({
+    subject: `📄 Contrato${temVistoria ? ' + Vistoria' : ''} para assinatura — ${contrato || imovel}`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:32px;background:#f9fafb;border-radius:12px">
+        <h2 style="color:#1a56db;margin-bottom:4px">Olá, ${nome}!</h2>
+        <p style="color:#6b7280;margin-top:0">Seu contrato de locação está disponível para assinatura${temVistoria ? ', já com a vistoria fotográfica em anexo' : ''}.</p>
+        <div style="background:#fff;border-radius:10px;padding:24px;margin:24px 0;border:1px solid #e5e7eb">
+          <p style="margin:0 0 10px;font-size:14px;color:#374151"><strong>🏠 Imóvel:</strong> ${imovel}</p>
+          ${contrato ? `<p style="margin:0 0 10px;font-size:14px;color:#374151"><strong>📄 Contrato:</strong> ${contrato}</p>` : ''}
+          ${temVistoria ? `<p style="margin:0 0 16px;font-size:14px;color:#374151"><strong>📷 Vistoria:</strong> fotos do imóvel anexadas como parte integrante do contrato (Cláusula 28).</p>` : ''}
+          <a href="${appUrl}" style="display:inline-block;background:#1a56db;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">✍️ Acessar Portal e Assinar</a>
+        </div>
+        <p style="font-size:12px;color:#9ca3af">Acesse com seu CPF como usuário e senha. A assinatura no portal tem validade eletrônica (Lei 14.063/2020).</p>
+      </div>`,
+  }),
 };
 
 function asaasBase() {
