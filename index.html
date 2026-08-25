@@ -229,7 +229,7 @@
           </div>
         </div>
         <div class="chart-card chart-card-alerta">
-          <h3>⚠️ Contratos Vencendo em 30 Dias</h3>
+          <h3>⚠️ Contratos Vencidos e Vencendo em 30 Dias</h3>
           <div class="table-wrapper" style="box-shadow:none">
             <table>
               <thead id="dash-venc-thead"><tr><th>Código</th><th>Imóvel</th><th>Inquilino</th><th>Vencimento</th><th>Restam</th><th>Renovar</th></tr></thead>
@@ -239,7 +239,7 @@
         </div>
       </div>
 
-      <!-- SUGESTÃO DE REAJUSTE (populado via JS quando há contratos vencendo) -->
+      <!-- CONTRATOS A RENOVAR — vencidos + vencendo em 30 dias (populado via JS) -->
       <div id="dash-reajuste-section" class="dash-reajuste-wrapper" style="display:none"></div>
 
       <!-- COBRANÇAS PENDENTES DO MÊS -->
@@ -314,6 +314,7 @@
           <button class="filter-pill"        data-filter="OCUPADO"       onclick="setFilterPill('imo-filter-bar','OCUPADO',renderImoveis)">Ocupado</button>
           <button class="filter-pill"        data-filter="EM MANUTENÇÃO" onclick="setFilterPill('imo-filter-bar','EM MANUTENÇÃO',renderImoveis)">Em Manutenção</button>
         </div>
+        <div id="imo-resumo" style="display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 14px"></div>
         <table>
           <thead id="imo-thead">
             <tr><th>Unidade</th><th>Prédio</th><th>Aluguel</th><th>Status</th><th>Fotos</th><th>Ações</th></tr>
@@ -375,8 +376,10 @@
             <button class="filter-pill active" data-filter="todos"     onclick="setFilterPill('ct-filter-bar','todos',renderContratos)">Todos</button>
             <button class="filter-pill"        data-filter="ATIVO"     onclick="setFilterPill('ct-filter-bar','ATIVO',renderContratos)">Ativo</button>
             <button class="filter-pill"        data-filter="ENCERRADO" onclick="setFilterPill('ct-filter-bar','ENCERRADO',renderContratos)">Encerrado</button>
+            <button class="filter-pill"        data-filter="ENCERRADO INADIMPLENTE" onclick="setFilterPill('ct-filter-bar','ENCERRADO INADIMPLENTE',renderContratos)">Enc. Inadimplente</button>
             <button class="filter-pill"        data-filter="SUSPENSO"  onclick="setFilterPill('ct-filter-bar','SUSPENSO',renderContratos)">Suspenso</button>
           </div>
+          <div id="ct-resumo-status" style="display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 14px"></div>
           <table>
             <thead id="ct-thead">
               <tr><th>Código</th><th>Imóvel</th><th>Inquilino</th><th>Início</th><th>Término</th><th>Valor Mensal</th><th>Status</th><th>Arquivo</th><th>Ações</th></tr>
@@ -461,6 +464,12 @@
           <div class="card-label">Saldo do Período</div>
           <div class="card-value" style="font-size:17px" id="fin-saldo">—</div>
         </div>
+        <div class="card" id="fin-atraso-card">
+          <div class="card-icon" id="fin-atraso-icon" style="background:#fee2e2">🔴</div>
+          <div class="card-label">Em Atraso</div>
+          <div class="card-value" style="font-size:17px" id="fin-total-atraso">—</div>
+          <div class="card-sub" id="fin-qtd-atraso"></div>
+        </div>
         <div class="card">
           <div class="card-icon yellow">📋</div>
           <div class="card-label">Registros</div>
@@ -484,6 +493,7 @@
           <button class="filter-pill"        data-filter="PENDENTE" onclick="setFilterPill('fin-filter-bar','PENDENTE',renderFinanceiro)">Pendente</button>
           <button class="filter-pill"        data-filter="PARCIAL"  onclick="setFilterPill('fin-filter-bar','PARCIAL',renderFinanceiro)">Parcial</button>
           <button class="filter-pill"        data-filter="PAGO"     onclick="setFilterPill('fin-filter-bar','PAGO',renderFinanceiro)">Pago</button>
+          <button class="filter-pill"        data-filter="BAIXA_MANUAL" onclick="setFilterPill('fin-filter-bar','BAIXA_MANUAL',renderFinanceiro)">Baixa manual</button>
         </div>
         <table>
           <thead id="fin-thead">
@@ -2161,6 +2171,17 @@
           </div>
         </div>
 
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Desconto (R$)</label>
+            <input name="descontoValor" type="number" step="0.01" min="0" placeholder="0,00" oninput="calcFinanceiro()">
+          </div>
+          <div class="form-group">
+            <label>Descri&ccedil;&atilde;o do desconto</label>
+            <input name="descontoDescricao" type="text" placeholder="Ex: desconto pontualidade">
+          </div>
+        </div>
+
         <!-- 3. CONSUMO DE ENERGIA -->
         <div id="fin-energia-section">
           <div class="form-section-label" style="display:flex;align-items:center;justify-content:space-between">
@@ -2238,6 +2259,7 @@
           <div class="fin-resumo-row"><span>Consumo de Energia</span><span id="fin-resumo-energia">R$ 0,00</span></div>
           <div class="fin-resumo-row"><span>Multa por Atraso</span><span id="fin-resumo-multa" style="color:var(--danger)">R$ 0,00</span></div>
           <div class="fin-resumo-row"><span>Mora</span><span id="fin-resumo-mora" style="color:var(--danger)">R$ 0,00</span></div>
+          <div class="fin-resumo-row" id="fin-resumo-desconto-row" style="display:none"><span>Desconto</span><span id="fin-resumo-desconto" style="color:var(--success)">R$ 0,00</span></div>
           <div class="fin-resumo-row fin-resumo-total"><span>TOTAL GERAL</span><span id="fin-resumo-total">R$ 0,00</span></div>
         </div>
 
@@ -2317,7 +2339,7 @@
             <input name="valorRecebido" type="number" step="0.01" min="0" required>
           </div>
           <div class="form-group form-col-2">
-            <label>Comprovante (opcional)</label>
+            <label>Comprovante * <span style="font-weight:400;color:#888;font-size:11px">(obrigatorio)</span></label>
             <div id="baixa-comprovante-zone"></div>
             <input type="file" id="baixa-file-input" accept="image/*,.pdf" style="display:none" onchange="handleBaixaFile(this)">
           </div>

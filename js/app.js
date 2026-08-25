@@ -383,6 +383,24 @@ function renderReajusteContratos({ todos, melhor }) {
     <div class="reaj-cards-wrap">${cardsHtml}</div>`;
 }
 
+// Encerra um contrato (vencido ou não): status ENCERRADO, PRESERVANDO todo o
+// histórico (boletos e pagamentos ficam intactos). Mesmo padrão do confirmarRenovacao.
+function encerrarContratoVencido(id) {
+  const idx = DB.contratos.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  const c = DB.contratos[idx];
+  if (!confirm_(`Encerrar o contrato ${c.codigo} (${c.inquilino || ''})?\n\nTodo o histórico e os boletos pagos são preservados — o contrato apenas sai do painel de renovação e passa a status ENCERRADO.`)) return;
+  const antes = { ...c };
+  DB.contratos[idx] = { ...c, status: 'ENCERRADO' };
+  _auditLog('editar', 'contrato', id, c.codigo, antes, DB.contratos[idx]);
+  _syncImovelStatus(c.imovel);
+  saveData();
+  renderDashboard();
+  renderContratos();
+  renderImoveis();
+  toast(`Contrato ${c.codigo} encerrado. Histórico mantido.`, 'success');
+}
+
 function toast(msg, type = '') {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -495,6 +513,9 @@ function _podeAcao(page, acao) {
   if (!_currentUser) return false;
   if (_currentUser.perfil === 'supermaster') return true;
   if (_currentUser.perfil === 'admin') return true;
+  // Exclusão de contrato/imóvel/inquilino é RESTRITA ao administrador — nenhum perfil
+  // abaixo de admin pode excluir esses registros (protege dados críticos de sumirem).
+  if (acao === 'excluir' && ['contratos', 'imoveis', 'inquilinos'].includes(page)) return false;
   const p = _currentUser.permissoes;
   if (!p) return false;
   // Suporte ao formato antigo (array de strings)
@@ -652,6 +673,8 @@ function gerarNotificacoes() {
   const empId = _currentEmpresaId();
 
   // Remove notificações de manutenção que voltaram ao status 'ok' (preventiva concluída/reagendada)
+  // Snapshot dos ids no inicio - persistir so o delta (granular), sem reenviar o banco.
+  const _notifIdsInicial = new Set(DB.notificacoes.map(n => n.id));
   const idsAtivas = new Set(_myData(DB.manutencaoPreventiva)
     .filter(m => _prevAlertStatus(m) !== 'ok').map(m => m.id));
   DB.notificacoes = DB.notificacoes.filter(n =>
@@ -741,7 +764,11 @@ function gerarNotificacoes() {
     novas++;
   });
 
-  if (novas > 0) saveData();
+  // Persistencia GRANULAR do delta (substitui saveData() que reenviava o banco
+  // inteiro e podia apagar registros de outra aba defasada - causa dos sumicos).
+  const _notifIdsAtuais = new Set(DB.notificacoes.map(n => n.id));
+  _notifIdsInicial.forEach(id => { if (!_notifIdsAtuais.has(id)) deleteRecord('notificacoes', id); });
+  DB.notificacoes.forEach(n => { if (!_notifIdsInicial.has(n.id)) saveRecord('notificacoes', n, { isNew: true }); });
   renderCampainhaNotif();
 }
 
@@ -797,7 +824,7 @@ function marcarLidoNotif(id) {
 function excluirNotificacao(id) {
   if (!Array.isArray(DB.notificacoes)) return;
   DB.notificacoes = DB.notificacoes.filter(n => n.id !== id);
-  saveData();
+  deleteRecord('notificacoes', id);
   renderCampainhaNotif();
 }
 
@@ -1111,7 +1138,8 @@ function renderDashboard() {
   let vencendo = _myContratos
     .filter(c => {
       if (!c.dataTermino || c.status !== 'ATIVO') return false;
-      return c.dataTermino >= todayStr && c.dataTermino <= em30Str;
+      // Inclui VENCIDOS (término já passou) + os que vencem nos próximos 30 dias.
+      return c.dataTermino <= em30Str;
     });
   // sort padrão por data; override pelo _sortState se usuário clicou
   if (_sortState['dash-venc']) {
@@ -1127,26 +1155,33 @@ function renderDashboard() {
     _th('dash-venc','inquilino','Inquilino') +
     _th('dash-venc','dataTermino','Vencimento') +
     _thStatic('Restam') +
-    _thStatic('Renovar') +
+    _thStatic('Ações') +
   '</tr>';
 
   const tbodyVenc = document.getElementById('dash-vencendo');
   if (vencendo.length === 0) {
-    tbodyVenc.innerHTML = `<tr><td colspan="6"><div class="empty"><p>Nenhum contrato vencendo nos próximos 30 dias ✓</p></div></td></tr>`;
+    tbodyVenc.innerHTML = `<tr><td colspan="6"><div class="empty"><p>Nenhum contrato vencido ou a vencer nos próximos 30 dias ✓</p></div></td></tr>`;
   } else {
     tbodyVenc.innerHTML = vencendo.map(c => {
       const dias = Math.ceil((new Date(c.dataTermino + 'T12:00:00') - new Date(todayStr + 'T12:00:00')) / 86400000);
+      const isVencido = c.dataTermino < todayStr;
       const urgente = c.dataTermino <= em7Str;
       const badgeClass = urgente ? 'badge-red' : 'badge-yellow';
       const rowClass  = urgente ? 'tr-urgente' : 'tr-proximo';
+      const restamHtml = isVencido
+        ? `<span class="badge badge-red">⚠️ Vencido há ${-dias}d</span>`
+        : `<span class="dias-restantes ${urgente ? 'dias-urgente' : 'dias-proximo'}">${dias}d</span>`;
       return `
         <tr class="${rowClass}">
           <td><strong>${c.codigo}</strong></td>
           <td>${c.imovel}</td>
           <td>${c.inquilino || '—'}</td>
           <td><span class="badge ${badgeClass}">${fmtDate(c.dataTermino)}</span></td>
-          <td><span class="dias-restantes ${urgente ? 'dias-urgente' : 'dias-proximo'}">${dias}d</span></td>
-          <td><button class="btn btn-primary btn-sm" onclick="openRenovacao(${c.id})">🔄 Renovar</button></td>
+          <td>${restamHtml}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-primary btn-sm" onclick="openRenovacao(${c.id})">🔄 Renovar</button>
+            <button class="btn btn-ghost btn-sm" onclick="encerrarContratoVencido(${c.id})">📁 Encerrar</button>
+          </td>
         </tr>`;
     }).join('');
   }
@@ -1361,8 +1396,9 @@ function _aplicarSort(list, page) {
     let vb = s.col === '_encargos' ? (b.valorMulta||0)+(b.valorMora||0)
            : s.col === '_statusPag' ? (b.baixaManual && _finCobre(b.valorRecebido, b.totalGeral) ? 'PAGO' : b.baixaManual ? 'PARCIAL' : 'PENDENTE')
            : b[s.col] ?? '';
+    const _ehDataISO = v => /^\d{4}-\d{2}-\d{2}/.test(String(v));
     const na = parseFloat(va), nb = parseFloat(vb);
-    if (!isNaN(na) && !isNaN(nb)) return s.dir === 'asc' ? na - nb : nb - na;
+    if (!isNaN(na) && !isNaN(nb) && !_ehDataISO(va) && !_ehDataISO(vb)) return s.dir === 'asc' ? na - nb : nb - na;
     va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
     const cmp = va.localeCompare(vb, 'pt-BR');
     return s.dir === 'asc' ? cmp : -cmp;
@@ -1573,7 +1609,7 @@ function openInquilinoFicha(id) {
           </div>
           <div style="text-align:right">
             <div style="font-weight:700">${fmt(c.valorMensal)}<span style="font-size:11px;color:var(--gray-400)">/mês</span></div>
-            <span class="badge ${c.status === 'ATIVO' ? 'badge-green' : c.status === 'ENCERRADO' ? 'badge-red' : 'badge-gray'}">${c.status}</span>
+            <span class="badge ${c.status === 'ATIVO' ? 'badge-green' : (c.status || '').startsWith('ENCERRADO') ? 'badge-red' : 'badge-gray'}">${c.status}</span>
           </div>
         </div>`).join('');
 
@@ -1812,6 +1848,7 @@ async function saveInquilino() {
 }
 
 async function deleteInquilino(id) {
+  if (!_podeAcao('inquilinos', 'excluir')) { alert('Exclusão de inquilino é restrita ao administrador.'); return; }
   if (!confirm_('Excluir este inquilino?')) return;
   const inq = DB.inquilinos.find(x => x.id === id);
   _auditLog('excluir', 'inquilino', id, inq?.nome || String(id), inq, null);
@@ -2243,6 +2280,7 @@ function savePredio() {
 }
 
 function deletePredio(id) {
+  if (!_podeAcao('imoveis', 'excluir')) { alert('Exclusão de imóvel/prédio é restrita ao administrador.'); return; }
   const unidades = _myData(DB.imoveis).filter(i => i.predioId === id).length;
   const msg = unidades > 0
     ? `Este prédio tem ${unidades} unidade(s) vinculada(s). Deseja excluir mesmo assim?`
@@ -2250,7 +2288,7 @@ function deletePredio(id) {
   if (!confirm_(msg)) return;
   DB.predios = (DB.predios || []).filter(x => x.id !== id);
   if (_predioFiltro === id) { _predioFiltro = null; }
-  saveData();
+  deleteRecord('predios', id);
   renderPredios();
   renderImoveis();
   toast('Prédio excluído');
@@ -2283,6 +2321,20 @@ function renderImoveis() {
     list = list.filter(i => i.status === statusFilter);
   }
   list = _aplicarSort(list, 'imo');
+
+  // Resumo: soma do valor (aluguel) de TODOS os imóveis da empresa (independente de filtro)
+  const _imoResumo = document.getElementById('imo-resumo');
+  if (_imoResumo) {
+    const _todosImo = _myData(DB.imoveis);
+    const _soma = arr => arr.reduce((s, i) => s + (parseFloat(i.valorAluguel) || 0), 0);
+    const _chip = (label, txt, cor) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:${cor}1a;border:1px solid ${cor}55;font-size:13px;font-weight:600;color:${cor}">${label}: <strong>${txt}</strong></span>`;
+    _imoResumo.innerHTML =
+      _chip('🏠 Imóveis', _todosImo.length, '#2563eb') +
+      _chip('💰 Soma dos aluguéis', fmt(_soma(_todosImo)), '#16a34a') +
+      _chip('🟢 Ocupados', fmt(_soma(_todosImo.filter(i => i.status === 'OCUPADO'))), '#0e9f6e') +
+      _chip('⚪ Disponíveis', fmt(_soma(_todosImo.filter(i => i.status === 'DISPONÍVEL'))), '#6b7280');
+  }
+
   const _imoThead = document.getElementById('imo-thead');
   if (_imoThead) _imoThead.innerHTML = '<tr>' +
     _th('imo','nome','Unidade') + _thStatic('Prédio') +
@@ -2408,11 +2460,12 @@ function saveImovel() {
 }
 
 function deleteImovel(id) {
+  if (!_podeAcao('imoveis', 'excluir')) { alert('Exclusão de imóvel é restrita ao administrador.'); return; }
   if (!confirm_('Excluir este imóvel?')) return;
   const imo = DB.imoveis.find(x => x.id === id);
   _auditLog('excluir', 'imovel', id, imo?.nome || String(id), imo, null);
   DB.imoveis = DB.imoveis.filter(x => x.id !== id);
-  saveData();
+  deleteRecord('imoveis', id);
   renderImoveis();
   toast('Imóvel excluído');
 }
@@ -2575,6 +2628,21 @@ function renderContratos() {
     list = list.filter(c => c.status === statusFilter);
   }
   list = _aplicarSort(list, 'ct');
+
+  // Quantitativo por status (do total da empresa, independente de busca/filtro)
+  const _resumoEl = document.getElementById('ct-resumo-status');
+  if (_resumoEl) {
+    const _todosCt = _myData(DB.contratos);
+    const _cont = s => _todosCt.filter(c => (c.status || '') === s).length;
+    const _chip = (label, n, cor) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:${cor}1a;border:1px solid ${cor}55;font-size:13px;font-weight:600;color:${cor}">${label}: <strong>${n}</strong></span>`;
+    _resumoEl.innerHTML =
+      _chip('📄 Total', _todosCt.length, '#2563eb') +
+      _chip('✅ Ativos', _cont('ATIVO'), '#16a34a') +
+      _chip('📁 Encerrados', _cont('ENCERRADO'), '#6b7280') +
+      _chip('🔴 Enc. Inadimplentes', _cont('ENCERRADO INADIMPLENTE'), '#dc2626') +
+      _chip('⏸️ Suspensos', _cont('SUSPENSO'), '#d97706');
+  }
+
   const _ctThead = document.getElementById('ct-thead');
   if (_ctThead) _ctThead.innerHTML = '<tr>' +
     _th('ct','codigo','Código') + _th('ct','imovel','Imóvel') +
@@ -2633,7 +2701,7 @@ function renderContratos() {
           <td>${alerta ? `<span class="badge badge-yellow">${fmtDate(c.dataTermino)} ⚠️</span>` : fmtDate(c.dataTermino)}</td>
           <td><strong>${fmt(c.valorMensal)}</strong></td>
           <td>${caucaoCell}</td>
-          <td><span class="badge ${c.status === 'ATIVO' ? 'badge-green' : c.status === 'ENCERRADO' ? 'badge-red' : 'badge-gray'}">${c.status}</span></td>
+          <td><span class="badge ${c.status === 'ATIVO' ? 'badge-green' : (c.status || '').startsWith('ENCERRADO') ? 'badge-red' : 'badge-gray'}">${c.status}</span></td>
           <td><div class="actions">${arquivoBtns}</div></td>
           <td>
             <div class="actions">
@@ -2689,7 +2757,7 @@ function removeContratoArquivo(id) {
   if (!confirm_('Remover o arquivo anexado?')) return;
   const idx = DB.contratos.findIndex(x => x.id === id);
   delete DB.contratos[idx].arquivo;
-  saveData();
+  saveRecord('contratos', DB.contratos[idx]);
   renderContratos();
   toast('Arquivo removido');
 }
@@ -2736,6 +2804,20 @@ function _ctPopularSelCoInq(excluirId = null) {
     DB.inquilinos
       .filter(i => i.id !== excluirId)
       .map(i => `<option value="${i.id}">${i.nome}</option>`).join('');
+}
+
+// Próximo código de contrato auto-gerado (CT-NNN), sequência por empresa.
+// Usa MAIOR número base existente + 1 (não count, pois há buracos na numeração);
+// extrai só a 1ª sequência numérica, ignorando o sufixo de renovação (-R1).
+function _proximoCodigoContrato(empresaId) {
+  const eid = empresaId ?? _currentEmpresaId();
+  let max = 0;
+  DB.contratos.forEach(c => {
+    if ((c.empresaId ?? null) !== (eid ?? null)) return;
+    const m = String(c.codigo || '').match(/(\d+)/);
+    if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+  });
+  return 'CT-' + String(max + 1).padStart(3, '0');
 }
 
 function openContrato(id = null) {
@@ -2803,9 +2885,13 @@ function openContrato(id = null) {
     _ctRenderCoInquilinos();
     _ctPopularSelCoInq(parseInt(form.inquilino.value) || null);
   } else {
+    form.codigo.value = _proximoCodigoContrato(); // contrato novo: código automático
     updateFileZone(null);
     updateCaucaoInfo(); // contrato novo: limpa o detalhamento de parcelas
   }
+  // Código é auto-gerado e imutável — impede duplicata (causa-raiz da mistura de boletos)
+  form.codigo.readOnly = true;
+  form.codigo.title = 'Código gerado automaticamente pelo sistema';
   const ctRecord = id ? DB.contratos.find(x => x.id === id) : null;
   renderCamposExtrasForm('contrato', 'ce-form-contrato', ctRecord);
   modal.classList.add('open');
@@ -2926,6 +3012,25 @@ async function saveContrato() {
   };
   if (_contratoArquivoPendente) data.arquivo = _contratoArquivoPendente;
   if (!data.codigo) { toast('Código é obrigatório', 'error'); return; }
+
+  // Código imutável após criado (auto-gerado): em edição preserva o do contrato
+  // existente — trocar o código quebraria os vínculos do financeiro (join por código).
+  if (existing) data.codigo = existing.codigo;
+
+  // Bloqueia código duplicado na MESMA empresa — causa-raiz da mistura de boletos
+  // entre contratos: dois contratos com o mesmo código compartilhavam o financeiro
+  // (que é casado por f.contrato === c.codigo em ~25 pontos). Código único = join seguro.
+  const _empAlvo  = existing?.empresaId ?? _currentEmpresaId();
+  const _codLower = data.codigo.trim().toLowerCase();
+  const _dupCt = DB.contratos.find(c =>
+    c.id !== id &&
+    (c.empresaId ?? null) === (_empAlvo ?? null) &&
+    (c.codigo || '').trim().toLowerCase() === _codLower
+  );
+  if (_dupCt) {
+    toast(`Já existe o contrato ${data.codigo} (${_dupCt.inquilino || 'sem inquilino'}). Use um código único.`, 'error');
+    return;
+  }
 
   // Valida parcelas da caução: datas preenchidas e soma igual ao total
   if (data.caucao > 0 && data.caucaoParcelas > 1) {
@@ -3095,7 +3200,7 @@ function gerarParcelasContrato(c) {
       gerado:          true,
     });
   }
-  return prazo;
+  return prazo + 1; // total de parcelas geradas (o loop vai de 0 a prazo, inclusive)
 }
 
 function gerarCaucaoContrato(c) {
@@ -3144,6 +3249,7 @@ function gerarCaucaoContrato(c) {
 }
 
 async function deleteContrato(id) {
+  if (!_podeAcao('contratos', 'excluir')) { alert('Exclusão de contrato é restrita ao administrador.'); return; }
   const ct = DB.contratos.find(x => x.id === id);
   if (!ct) return;
 
@@ -3278,7 +3384,12 @@ function gerarContrato(id) {
   if (c.dataInicio && c.dataTermino) {
     const d1 = new Date(c.dataInicio+'T12:00:00');
     const d2 = new Date(c.dataTermino+'T12:00:00');
-    prazoMeses = (d2.getFullYear()-d1.getFullYear())*12+(d2.getMonth()-d1.getMonth());
+    // Robusto p/ qualquer convenção de término (último dia do mês OU véspera do aniversário):
+    // conta meses cheios de dataInicio até (término + 1 dia).
+    // Ex.: 01/07/26→30/06/27 = 12; 05/01/26→04/01/27 = 12; 15/03/26→14/09/26 = 6.
+    const _fim = new Date(d2); _fim.setDate(_fim.getDate() + 1);
+    prazoMeses = (_fim.getFullYear()-d1.getFullYear())*12 + (_fim.getMonth()-d1.getMonth());
+    if (_fim.getDate() < d1.getDate()) prazoMeses -= 1;
   }
 
   // Endereço completo do imóvel
@@ -3787,6 +3898,7 @@ function renderFinanceiro() {
       if (statusPagFilter === 'PENDENTE') return !f.baixaManual && !(f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && tot > 0;
       if (statusPagFilter === 'PAGO')     return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && _finCobre(rec, tot) && tot > 0;
       if (statusPagFilter === 'PARCIAL')  return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && _finParcial(rec, tot);
+      if (statusPagFilter === 'BAIXA_MANUAL') return f.baixaManual === true && f.asaasStatus !== 'RECEIVED' && f.asaasStatus !== 'CONFIRMED';
       return true;
     });
   }
@@ -3812,6 +3924,33 @@ function renderFinanceiro() {
   document.getElementById('fin-saldo').textContent          = fmt(saldo);
   document.getElementById('fin-qtd').textContent            = list.length;
 
+  // Card "Em Atraso" — TODOS os boletos vencidos e não pagos (independente do período visto)
+  const _hojeStr = today();
+  const _emAtrasoTodos = _myData(DB.financeiro).filter(f => {
+    const pg = f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
+    return !pg && (f.totalGeral || 0) > 0 && f.dataPagamento < _hojeStr;
+  });
+  const _atrasoValEl = document.getElementById('fin-total-atraso');
+  if (_atrasoValEl) {
+    const _card = document.getElementById('fin-atraso-card');
+    const _icon = document.getElementById('fin-atraso-icon');
+    const _sub  = document.getElementById('fin-qtd-atraso');
+    if (_emAtrasoTodos.length > 0) {
+      const _totalAtraso = _emAtrasoTodos.reduce((s, f) => s + (f.totalGeral || 0), 0);
+      _atrasoValEl.textContent = fmt(_totalAtraso);
+      _atrasoValEl.style.color = '#b91c1c';
+      if (_sub)  _sub.textContent = `${_emAtrasoTodos.length} boleto${_emAtrasoTodos.length !== 1 ? 's' : ''} vencido${_emAtrasoTodos.length !== 1 ? 's' : ''}`;
+      if (_card) { _card.style.background = '#fef2f2'; _card.style.border = '1.5px solid #fca5a5'; }
+      if (_icon) { _icon.textContent = '🔴'; _icon.style.background = '#fee2e2'; }
+    } else {
+      _atrasoValEl.textContent = fmt(0);
+      _atrasoValEl.style.color = 'var(--success)';
+      if (_sub)  _sub.textContent = 'Em dia';
+      if (_card) { _card.style.background = ''; _card.style.border = ''; }
+      if (_icon) { _icon.textContent = '✅'; _icon.style.background = '#d1fae5'; }
+    }
+  }
+
   // Cor do saldo
   const saldoEl   = document.getElementById('fin-saldo');
   const saldoIcon = document.getElementById('fin-saldo-icon');
@@ -3833,9 +3972,14 @@ function renderFinanceiro() {
   // Tabela
   document.getElementById('fin-tbody').innerHTML = list.length === 0
     ? `<tr><td colspan="13"><div class="empty"><div class="empty-icon">💰</div><p>Nenhum pagamento em ${labelPeriodo}</p></div></td></tr>`
-    : list.map(f => `
-      <tr>
-        <td>${fmtDate(f.dataPagamento)}</td>
+    : list.map(f => {
+        // Destaque de boleto EM ATRASO (venceu e não foi pago)
+        const _pagoFin = f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
+        const _emAtraso = !_pagoFin && (f.totalGeral || 0) > 0 && f.dataPagamento < _hojeStr;
+        const _diasAtraso = _emAtraso ? Math.floor((new Date(_hojeStr + 'T12:00:00') - new Date(f.dataPagamento + 'T12:00:00')) / 86400000) : 0;
+        return `
+      <tr${_emAtraso ? ' style="background:#fef2f2;border-left:4px solid #e02424"' : ''}>
+        <td${_emAtraso ? ' style="font-weight:700;color:#b91c1c"' : ''}>${fmtDate(f.dataPagamento)}</td>
         <td>
           <strong><span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.contrato)},renderFinanceiro)" title="Filtrar por este contrato">${f.contrato}</span></strong>
           ${f.tipo === 'caucao' ? `<br><span class="badge badge-yellow" style="font-size:10px;margin-top:2px">🔒 ${f.observacoes || 'Caução'}</span>` : ''}
@@ -3843,7 +3987,7 @@ function renderFinanceiro() {
         <td>${f._unidade
               ? `<span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f._unidade)},renderFinanceiro)" title="Filtrar por esta unidade">🏠 ${f._unidade}</span>`
               : '<span style="color:var(--gray-400)">—</span>'}</td>
-        <td>${f.inquilino ? `<span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.inquilino)},renderFinanceiro)" title="Filtrar por este inquilino">${f.inquilino}</span>` : '—'}</td>
+        <td>${f.inquilino ? `<span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.inquilino)},renderFinanceiro)" title="Filtrar por este inquilino">${f.inquilino}</span>` : '—'}${_emAtraso ? `<span style="font-size:11px;font-weight:700;margin-left:6px;padding:2px 7px;border-radius:5px;background:#e02424;color:#fff;white-space:nowrap">⚠️ EM ATRASO ${_diasAtraso}d</span>` : ''}</td>
         <td>${f.tipo === 'caucao' ? `<span style="color:var(--gray-400);font-size:11px">—</span>` : fmt(f.valorContrato)}</td>
         <td>${(f.consumoAgua || 0) > 0 ? fmt(f.consumoAgua) : '—'}</td>
         <td>${(f.totalEnergia || 0) > 0 ? fmt(f.totalEnergia) : '—'}</td>
@@ -3855,6 +3999,7 @@ function renderFinanceiro() {
           <strong style="color:var(--success)">${fmt(f.valorRecebido)}</strong>
           ${f.formaPagamento ? `<div style="font-size:11px;color:var(--gray-500);margin-top:2px">💳 ${f.formaPagamento}</div>` : ''}
           ${(() => { const cs = _getComprovantes(f); return cs.length > 0 ? `<button class="btn btn-ghost btn-sm" style="margin-top:4px;font-size:10px" onclick="verComprovantes(${f.id})">🧾 ${cs.length > 1 ? cs.length + ' comprovantes' : 'Comprovante'}</button>` : ''; })()}
+          ${f.baixaManual ? `<button class="btn btn-ghost btn-sm" style="margin-top:4px;font-size:10px" onclick="verBaixa(${f.id})">👁 Ver baixa</button>` : ''}
         </td>
         <td>${(() => {
           const rec = f.valorRecebido || 0;
@@ -3862,7 +4007,7 @@ function renderFinanceiro() {
           const pago = f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
           if (pago && _finCobre(rec, tot) && tot > 0)  return '<span class="badge badge-green">PAGO</span>';
           if (pago && _finParcial(rec, tot))           return '<span class="badge badge-yellow">PARCIAL</span>';
-          if (!pago && tot > 0)                        return '<span class="badge badge-red">PENDENTE</span>';
+          if (!pago && tot > 0)               return '<span class="badge badge-red">PENDENTE</span>';
           return '—';
         })()}</td>
         <td>${(() => {
@@ -3880,16 +4025,18 @@ function renderFinanceiro() {
             ${(() => {
               const tot  = f.totalGeral || 0;
               const pago = f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
-              return (!pago && tot > 0 && _podeAcao('financeiro','editar'))
-                ? `<button class="btn btn-primary btn-sm" onclick="openBaixa(${f.id})">💰 Baixar</button>`
-                : '';
+              if (!(tot > 0 && _podeAcao('financeiro','editar'))) return '';
+              return pago
+                ? `<button class="btn btn-ghost btn-sm" onclick="openBaixa(${f.id})">📎 Editar baixa</button>`
+                : `<button class="btn btn-primary btn-sm" onclick="openBaixa(${f.id})">💰 Baixar</button>`;
             })()}
             <button class="btn btn-ghost btn-sm" style="color:#25D366" onclick="enviarBoletoWhatsappDireto(${f.id})" title="Enviar via WhatsApp">📱</button>
             ${_podeAcao('financeiro','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openFinanceiro(${f.id})">Editar</button>` : ''}
             ${_podeAcao('financeiro','excluir') ? `<button class="btn btn-danger btn-sm" onclick="deleteFinanceiro(${f.id})">Excluir</button>` : ''}
           </div>
         </td>
-      </tr>`).join('');
+      </tr>`;
+      }).join('');
 }
 
 // Recalcula todos os campos derivados do modal financeiro
@@ -3935,7 +4082,8 @@ function calcFinanceiro() {
   // Totalizador
   const txManutencao = num('taxaManutencao');
   const txExtras     = num('taxasExtras');
-  const total = valCtrt + num('consumoAgua') + txManutencao + txExtras + totEner + multa + mora;
+  const descontoVlr = num('descontoValor');
+  const total = valCtrt + num('consumoAgua') + txManutencao + txExtras + totEner + multa + mora - descontoVlr;
   document.getElementById('fin-resumo-contrato').textContent   = fmt(valCtrt);
   document.getElementById('fin-resumo-agua').textContent       = fmt(num('consumoAgua'));
   document.getElementById('fin-resumo-manutencao').textContent = fmt(txManutencao);
@@ -3944,6 +4092,8 @@ function calcFinanceiro() {
   document.getElementById('fin-resumo-multa').textContent      = fmt(multa);
   document.getElementById('fin-resumo-mora').textContent       = fmt(mora);
   document.getElementById('fin-resumo-total').textContent      = fmt(total);
+  const _rowDesc = document.getElementById('fin-resumo-desconto-row');
+  if (_rowDesc) { _rowDesc.style.display = descontoVlr > 0 ? '' : 'none'; document.getElementById('fin-resumo-desconto').textContent = '- ' + fmt(descontoVlr); }
 
   // Sugere valor recebido se ainda não preenchido pelo usuário
   const campoRecebido = form.elements['valorRecebido'];
@@ -4054,6 +4204,8 @@ function openFinanceiro(id = null) {
     el('leituraAtual').value    = f.leituraAtual    || 0;
     el('valorKwh').value        = f.valorKwh        || 0;
     if (el('descontoEnergia')) el('descontoEnergia').value = f.descontoEnergia || 0;
+    if (el('descontoValor')) el('descontoValor').value = f.descontoValor || 0;
+    if (el('descontoDescricao')) el('descontoDescricao').value = f.descontoDescricao || '';
     el('pctMulta').value        = f.pctMulta        || 0;
     el('diasAtraso').value      = f.diasAtraso      || 0;
     el('pctMora').value         = f.pctMora         || 0;
@@ -4102,7 +4254,8 @@ async function saveFinanceiro() {
   const totalEnergia      = totalEnergiaBruto * (1 - descontoEnergia / 100);   // líquido (com desconto)
   const valorMulta   = num('valorContrato') * (num('pctMulta') / 100);
   const valorMora    = num('valorContrato') * (num('pctMora') / 100) * num('diasAtraso');
-  const totalGeral   = num('valorContrato') + num('consumoAgua') + num('taxaManutencao') + num('taxasExtras') + totalEnergia + valorMulta + valorMora;
+  const descontoValor = num('descontoValor');
+  const totalGeral   = num('valorContrato') + num('consumoAgua') + num('taxaManutencao') + num('taxasExtras') + totalEnergia + valorMulta + valorMora - descontoValor;
 
   const data = {
     dataPagamento:  form.dataPagamento.value,
@@ -4112,6 +4265,8 @@ async function saveFinanceiro() {
     consumoAgua:    num('consumoAgua'),
     taxaManutencao: num('taxaManutencao'),
     taxasExtras:    num('taxasExtras'),
+    descontoValor,
+    descontoDescricao: form.elements['descontoDescricao'] ? form.elements['descontoDescricao'].value.trim() : '',
     leituraAnterior:num('leituraAnterior'),
     leituraAtual:   num('leituraAtual'),
     valorKwh:       num('valorKwh'),
@@ -4182,8 +4337,30 @@ async function saveFinanceiro() {
 }
 
 async function deleteFinanceiro(id) {
-  if (!confirm_('Excluir este registro?')) return;
   const fin = DB.financeiro.find(x => x.id === id);
+  // PROTEÇÃO: lançamento PAGO (Asaas OU baixa manual) NÃO pode ser excluído — preserva
+  // o histórico do dinheiro recebido. Reverter só estornando no Asaas ou reabrindo a baixa.
+  const _pago = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'].includes(fin?.asaasStatus)
+    || (fin?.baixaManual && (fin?.valorRecebido || 0) > 0);
+  if (_pago) {
+    alert('Este lançamento está PAGO e não pode ser excluído (protege o histórico financeiro).\n\nPara reverter, faça o estorno no Asaas ou reabra a baixa manual antes de excluir.');
+    return;
+  }
+  // Boleto Asaas vinculado: refletir a exclusao no Asaas
+  if (_asaasAtivo() && fin?.asaasPaymentId) {
+    const pago = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'].includes(fin.asaasStatus);
+    if (pago) {
+      alert('Este boleto ja foi PAGO no Asaas e nao pode ser excluido. Se necessario, faca o estorno pelo painel do Asaas.');
+      return;
+    }
+    if (!confirm('Excluir este registro? O boleto (nao pago) tambem sera CANCELADO no Asaas.')) return;
+    const res = await _asaasCall('DELETE', `/payment/${fin.asaasPaymentId}`);
+    if (!res.ok && !res.deleted) {
+      if (!confirm('Nao consegui cancelar o boleto no Asaas (' + (res.error || 'erro') + '). Excluir mesmo assim somente do sistema?')) return;
+    }
+  } else {
+    if (!confirm_('Excluir este registro?')) return;
+  }
   _auditLog('excluir', 'financeiro', id, fin?.contrato || String(id), fin, null);
   DB.financeiro = DB.financeiro.filter(x => x.id !== id);
   await deleteRecord('financeiro', id);
@@ -4217,7 +4394,7 @@ function openBaixa(id) {
     <div><span style="color:var(--gray-400)">Total a receber</span><br><strong style="color:var(--primary)">${fmt(f.totalGeral)}</strong></div>
     <div><span style="color:var(--gray-400)">Já recebido</span><br><strong style="color:var(--success)">${fmt(f.valorRecebido || 0)}</strong></div>`;
   form.elements['dataBaixa'].value     = today();
-  form.elements['valorRecebido'].value = (f.totalGeral || 0).toFixed(2);
+  form.elements['valorRecebido'].value = ((f.valorRecebido || f.totalGeral) || 0).toFixed(2);
   if (f.formaPagamento) form.elements['formaPagamento'].value = f.formaPagamento;
   if (f.dataBaixa)      form.elements['dataBaixa'].value      = f.dataBaixa;
   _renderBaixaComprovante();
@@ -4280,6 +4457,7 @@ async function salvarBaixa() {
   const obs            = form.elements['observacoesBaixa'].value.trim();
   if (!dataBaixa)      { toast('Informe a data do pagamento',  'error'); return; }
   if (!formaPagamento) { toast('Informe a forma de pagamento', 'error'); return; }
+  if (!_baixaComprovauntesPendentes || _baixaComprovauntesPendentes.length === 0) { toast('Anexe o comprovante do pagamento', 'error'); return; }
   const idx = DB.financeiro.findIndex(x => x.id === _baixaFinId);
   if (idx < 0) return;
   const f = DB.financeiro[idx];
@@ -4296,6 +4474,21 @@ async function salvarBaixa() {
   };
   _auditLog('editar', 'financeiro', _baixaFinId, f.contrato, antesBaixa, DB.financeiro[idx]);
   await saveRecord('financeiro', DB.financeiro[idx]);
+  // Reflete no Asaas quando pago POR FORA do boleto (Pix/dinheiro/transferencia)
+  try {
+    const fb = DB.financeiro[idx];
+    const formaBoleto = /boleto/i.test(formaPagamento || '');
+    const jaPagoAsaas = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'].includes(fb.asaasStatus);
+    if (_asaasAtivo() && fb.asaasPaymentId && !formaBoleto && !jaPagoAsaas) {
+      const r = await _asaasCall('POST', `/payment/${fb.asaasPaymentId}/receive-in-cash`, { paymentDate: dataBaixa, value: valorRecebido });
+      if (r.ok) {
+        DB.financeiro[idx].asaasStatus = 'RECEIVED_IN_CASH';
+        await saveRecord('financeiro', DB.financeiro[idx]);
+      } else {
+        toast('Baixa salva, mas nao fechei no Asaas: ' + (r.error || 'erro'), 'error');
+      }
+    }
+  } catch (e) { console.error('[baixa->asaas]', e); }
   closeModal('modal-baixa');
   renderFinanceiro();
   renderDashboard();
@@ -4303,6 +4496,35 @@ async function salvarBaixa() {
 }
 
 // Abre visualizador de comprovantes (suporta múltiplos e formato antigo)
+function verBaixa(id) {
+  const f = DB.financeiro.find(x => x.id === id);
+  if (!f) return;
+  const comps = _getComprovantes(f);
+  const compHtml = comps.length ? comps.map((c) => {
+    const dados = c.dados || c.data || '';
+    const isPdf = (c.tipo || '').includes('pdf') || String(dados).startsWith('data:application/pdf');
+    if (!dados) return '<div style="padding:10px;background:#fff3f3;border:1px solid #f5c2c2;border-radius:6px;color:#b91c1c;margin-top:8px">&#9888; <b>' + c.nome + '</b> &mdash; imagem indisponivel (reanexe o comprovante)</div>';
+    return isPdf
+      ? '<div style="margin-top:10px"><b>' + c.nome + '</b><br><iframe src="' + dados + '" style="width:100%;height:420px;border:1px solid #ccc;border-radius:6px"></iframe></div>'
+      : '<div style="margin-top:10px"><b>' + c.nome + '</b><br><img src="' + dados + '" style="max-width:100%;border:1px solid #ccc;border-radius:6px"></div>';
+  }).join('') : '<i style="color:#888">Nenhum comprovante anexado</i>';
+  const reais = v => 'R$ ' + (Number(v || 0)).toFixed(2);
+  const linha = (lbl, val) => '<tr><td style="padding:6px 12px;color:#666">' + lbl + '</td><td style="padding:6px 12px"><b>' + val + '</b></td></tr>';
+  const w = window.open();
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Baixa ' + (f.contrato || '') + '</title>'
+    + '<style>body{font-family:sans-serif;padding:24px;max-width:760px;margin:auto;color:#222}table{border-collapse:collapse;width:100%;margin-bottom:16px}td{border-bottom:1px solid #eee}h2{margin-top:0}</style></head>'
+    + '<body><h2>Informa&ccedil;&otilde;es da Baixa &mdash; ' + (f.inquilino || '') + ' (' + (f.contrato || '') + ')</h2><table>'
+    + linha('Data da baixa', f.dataBaixa || '&mdash;')
+    + linha('Forma de pagamento', f.formaPagamento || '&mdash;')
+    + linha('Valor recebido', reais(f.valorRecebido))
+    + linha('Valor total', reais(f.totalGeral))
+    + linha('Vencimento', f.dataPagamento || '&mdash;')
+    + '</table>'
+    + '<div style="color:#666;margin-bottom:4px">Observa&ccedil;&otilde;es:</div><div style="white-space:pre-wrap;background:#f9f9f9;padding:10px;border-radius:6px">' + (f.observacoes || '&mdash;') + '</div>'
+    + '<h3>Comprovante(s)</h3>' + compHtml
+    + '</body></html>');
+}
+
 function verComprovantes(id) {
   const f = DB.financeiro.find(x => x.id === id);
   const list = _getComprovantes(f);
@@ -4616,7 +4838,7 @@ function deleteManutencao(id) {
   const man = DB.manutencao.find(x => x.id === id);
   _auditLog('excluir', 'manutencao', id, man?.imovel || String(id), man, null);
   DB.manutencao = DB.manutencao.filter(x => x.id !== id);
-  saveData();
+  deleteRecord('manutencao', id);
   renderManutencao();
   toast('Registro excluído');
 }
@@ -4828,7 +5050,7 @@ function saveManutencaoPreventiva() {
 function deleteManutencaoPreventiva(id) {
   if (!confirm_('Excluir esta manutenção preventiva?')) return;
   DB.manutencaoPreventiva = DB.manutencaoPreventiva.filter(x => x.id !== id);
-  saveData();
+  deleteRecord('manutencaoPreventiva', id);
   renderManutencaoPreventiva();
   renderDashboard();
   toast('Preventiva excluída');
@@ -5146,7 +5368,7 @@ function deleteUsuario(id) {
   if (_currentUser?.id === id) { toast('Você não pode excluir sua própria conta', 'error'); return; }
   if (!confirm_('Excluir este usuário?')) return;
   DB.usuarios = DB.usuarios.filter(u => u.id !== id);
-  saveData();
+  deleteRecord('usuarios', id);
   renderUsuarios();
   toast('Usuário excluído');
 }
@@ -5190,15 +5412,22 @@ function openRenovacao(contratoId, pctSugerido = null) {
     `${fmtDate(c.dataInicio)} → ${fmtDate(c.dataTermino)}`;
   document.getElementById('renov-valor-atual').textContent = fmt(c.valorMensal || 0);
 
-  // Calcula prazo original em meses para propor igual período
+  // Prazo REAL do contrato em meses. O término é o último dia (ex.: 30/06), então
+  // a diferença de meses subconta 1 — o prazo real é (diferença + 1). Ex.: contrato
+  // de 01/07/2025 a 30/06/2026 = 12 meses (não 11).
   const d1 = new Date(c.dataInicio  + 'T12:00:00');
   const d2 = new Date(c.dataTermino + 'T12:00:00');
-  const prazo = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth());
+  const prazoMeses = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth()) + 1;
 
-  // Novo início = fim atual; novo término = fim atual + mesmo prazo
-  document.getElementById('renov-inicio').value = c.dataTermino;
-  const novoFim = new Date(c.dataTermino + 'T12:00:00');
-  novoFim.setMonth(novoFim.getMonth() + (prazo || 12));
+  // Novo início = dia SEGUINTE ao término atual (sem sobrepor o último dia).
+  const novoInicio = new Date(c.dataTermino + 'T12:00:00');
+  novoInicio.setDate(novoInicio.getDate() + 1);
+  document.getElementById('renov-inicio').value = novoInicio.toISOString().split('T')[0];
+
+  // Novo término = novo início + prazo real − 1 dia (mantém a convenção "último dia").
+  const novoFim = new Date(novoInicio);
+  novoFim.setMonth(novoFim.getMonth() + (prazoMeses || 12));
+  novoFim.setDate(novoFim.getDate() - 1);
   document.getElementById('renov-termino').value = novoFim.toISOString().split('T')[0];
 
   // Preenche % sugerido (quando clicado direto do card de índice)
@@ -5240,9 +5469,11 @@ function calcRenovacao() {
   if (inicio && termino) {
     const d1 = new Date(inicio  + 'T12:00:00');
     const d2 = new Date(termino + 'T12:00:00');
-    const meses = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth());
+    // Parcelas = diferença de meses + 1 (mesma contagem do gerarParcelasContrato,
+    // que faz o loop i <= prazo). Corrige o preview que mostrava 11 num contrato de 12.
+    const parcelas = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth()) + 1;
     document.getElementById('renov-parcelas-preview').textContent =
-      meses > 0 ? `${meses} parcela${meses !== 1 ? 's' : ''}` : '—';
+      parcelas > 0 ? `${parcelas} parcela${parcelas !== 1 ? 's' : ''}` : '—';
   }
 }
 
@@ -5259,27 +5490,36 @@ function confirmarRenovacao() {
   if (idx < 0) return;
   const c = DB.contratos[idx];
 
+  // Trava anti-duplicação (evita renovar 2× por clique duplo / aba defasada):
+  // 1) só renova contrato ATIVO; 2) aborta se o contrato de renovação já existe.
+  if (c.status !== 'ATIVO') { toast('Este contrato não está ATIVO — talvez já tenha sido renovado. Recarregue a página (F5).', 'error'); return; }
   const novoValor = Math.round((c.valorMensal || 0) * (1 + pct / 100) * 100) / 100;
   const qtdRenovacoes = (c.renovacoes || 0) + 1;
+  const _codRenov = (c.contratoOrigem ? c.contratoOrigem : c.codigo) + '-R' + qtdRenovacoes;
+  if (DB.contratos.some(x => x.codigo === _codRenov)) { toast(`Já existe o contrato ${_codRenov} — renovação já realizada. Recarregue (F5).`, 'error'); return; }
 
   // Encerra o contrato anterior
+  const _antesEnc = { ...c };
   DB.contratos[idx] = { ...c, status: 'ENCERRADO' };
+  _auditLog('editar', 'contrato', c.id, c.codigo, _antesEnc, DB.contratos[idx]); // registra o encerramento na renovação
   _syncImovelStatus(c.imovel);
 
   // Cria novo contrato derivado
   const novoCodigo = (c.contratoOrigem ? c.contratoOrigem : c.codigo) + '-R' + qtdRenovacoes;
   const novoContrato = {
     ...c,
-    id:             nextId(DB.contratos),
-    codigo:         novoCodigo,
-    dataInicio:     inicio,
-    dataTermino:    termino,
-    valorMensal:    novoValor,
-    status:         'ATIVO',
-    renovacoes:     qtdRenovacoes,
-    contratoOrigem: c.contratoOrigem || c.codigo,
+    id:                   nextId(DB.contratos),
+    codigo:               novoCodigo,
+    dataInicio:           inicio,
+    dataTermino:          termino,
+    dataPrimeiraCobranca: '', // reset: parcelas do novo período usam o novo início como base
+    valorMensal:          novoValor,
+    status:               'ATIVO',
+    renovacoes:           qtdRenovacoes,
+    contratoOrigem:       c.contratoOrigem || c.codigo,
   };
   DB.contratos.push(novoContrato);
+  _auditLog('criar', 'contrato', novoContrato.id, novoCodigo, null, novoContrato); // registra o novo contrato da renovação
   _syncImovelStatus(novoContrato.imovel);
 
   const qtd = gerarParcelasContrato(novoContrato);
@@ -5482,16 +5722,7 @@ async function gerarBoleto(finId) {
       if (_mes && _ano) _competencia = `${_MESES[parseInt(_mes, 10) - 1]}/${_ano}`;
     }
 
-    // Dados do imóvel / beneficiário / tipo — detalham o que está sendo pago
-    const _unidade  = contrato?.imovel || f.contrato;
-    const _ehCaucao = f.tipo === 'caucao';
-    // Rótulo: caução usa as observações ("Caução 1/2"); cobrança normal usa "Aluguel"
-    const _rotulo   = _ehCaucao ? (f.observacoes || 'Caução') : 'Aluguel';
-
-    linhasInst.push(`Beneficiario: ${_nomeLoc}`);
-    linhasInst.push(`Imovel/Unidade: ${_unidade}`);
     linhasInst.push(`Ref.: ${f.contrato} | Inquilino: ${f.inquilino || contrato?.inquilino || ''} | Venc.: ${fmtDate(f.dataPagamento)}`);
-    linhasInst.push(`Tipo de cobranca: ${_ehCaucao ? 'Caucao' : 'Aluguel'}`);
     if (_competencia) {
       linhasInst.push(`Competencia: ${_competencia}`);
       linhasObs.push(`Competencia: ${_competencia}`);
@@ -5528,11 +5759,6 @@ async function gerarBoleto(finId) {
       linhasObs.push(`Mora (${f.pctMora||0}% x ${f.diasAtraso||0} dias): R$ ${_fmt2(f.valorMora)}`);
       linhasInst.push(`Juros de mora (${f.pctMora||0}% ao mes, ${f.diasAtraso||0} dia(s)): R$ ${_fmt2(f.valorMora)}`);
     }
-    if (_ehCaucao) {
-      const _valCaucao = f.caucaoValor || f.totalGeral || 0;
-      linhasObs.push(`Valor da Caucao: R$ ${_fmt2(_valCaucao)}`);
-      linhasInst.push(`Valor da Caucao: R$ ${_fmt2(_valCaucao)}`);
-    }
 
     const _totalStr = `TOTAL A PAGAR: R$ ${_fmt2(f.totalGeral || f.valorContrato || 0)}`;
     linhasObs.push(_totalStr);
@@ -5546,7 +5772,12 @@ async function gerarBoleto(finId) {
     const observacoesBoleto  = linhasObs.join(' | ');
     const instrucoesBoleto   = linhasInst.join('\n');
 
-    // _unidade, _ehCaucao e _rotulo já declarados acima (usados nas instruções)
+    // Nome da unidade (imóvel) — usado no lugar do código do contrato
+    const _unidade = contrato?.imovel || f.contrato;
+    const _ehCaucao = f.tipo === 'caucao';
+    // Rótulo: caução usa as observações ("Caução 1/2"); cobrança normal usa "Aluguel"
+    const _rotulo = _ehCaucao ? (f.observacoes || 'Caução') : 'Aluguel';
+
     // Discriminação compacta dos valores para o description (único campo impresso pelo Asaas)
     let _discrimCurta = '';
     if (_ehCaucao) {
@@ -5563,6 +5794,7 @@ async function gerarBoleto(finId) {
         const _dEner = (f.descontoEnergia || 0) > 0 ? ` (-${f.descontoEnergia}%)` : '';
         _descParts.push(`Energia ${_kwh} kWh${_dEner} R$ ${_fmt2(f.totalEnergia)}`);
       }
+      if ((f.descontoValor || 0) > 0) _descParts.push(`Desconto -R$ ${_fmt2(f.descontoValor)}${f.descontoDescricao ? ' (' + f.descontoDescricao + ')' : ''}`);
       _discrimCurta = _descParts.length
         ? `. Discriminação: ${_descParts.join('; ')}. Total: R$ ${_fmt2(f.totalGeral || f.valorContrato || 0)}`
         : '';
@@ -5710,6 +5942,7 @@ function _discriminacaoPagamentoWhats(f) {
   }
   if ((f.valorMulta || 0) > 0) linhas.push(`• Multa (${f.pctMulta || 0}%): ${fmt(f.valorMulta)}`);
   if ((f.valorMora  || 0) > 0) linhas.push(`• Mora (${f.pctMora || 0}% x ${f.diasAtraso || 0} dias): ${fmt(f.valorMora)}`);
+  if ((f.descontoValor || 0) > 0) linhas.push(`🏷️ Desconto${f.descontoDescricao ? ' (' + f.descontoDescricao + ')' : ''}: -${fmt(f.descontoValor)}`);
   if (!linhas.length) return '';
   return `\n📋 *Discriminação do pagamento:*\n${linhas.join('\n')}\n`;
 }
@@ -7873,14 +8106,14 @@ function saveEmpresa() {
 
 function deleteEmpresa(id) {
   if (!confirm_('Excluir esta empresa e todos os seus dados?')) return;
-  DB.empresas      = DB.empresas.filter(x => x.id !== id);
-  DB.usuarios      = DB.usuarios.filter(x => x.empresaId !== id);
-  DB.inquilinos    = DB.inquilinos.filter(x => x.empresaId !== id);
-  DB.imoveis       = DB.imoveis.filter(x => x.empresaId !== id);
-  DB.contratos     = DB.contratos.filter(x => x.empresaId !== id);
-  DB.financeiro    = DB.financeiro.filter(x => x.empresaId !== id);
-  DB.manutencao    = DB.manutencao.filter(x => x.empresaId !== id);
-  saveData();
+  const _rmEmp = (arr, coll, pred) => arr.filter(x => { if (pred(x)) { deleteRecord(coll, x.id); return false; } return true; });
+  DB.empresas   = _rmEmp(DB.empresas,   'empresas',   x => x.id === id);
+  DB.usuarios   = _rmEmp(DB.usuarios,   'usuarios',   x => x.empresaId === id);
+  DB.inquilinos = _rmEmp(DB.inquilinos, 'inquilinos', x => x.empresaId === id);
+  DB.imoveis    = _rmEmp(DB.imoveis,    'imoveis',    x => x.empresaId === id);
+  DB.contratos  = _rmEmp(DB.contratos,  'contratos',  x => x.empresaId === id);
+  DB.financeiro = _rmEmp(DB.financeiro, 'financeiro', x => x.empresaId === id);
+  DB.manutencao = _rmEmp(DB.manutencao, 'manutencao', x => x.empresaId === id);
   renderEmpresas();
   toast('Empresa excluída', 'success');
 }
@@ -7998,7 +8231,7 @@ function deleteEmpUser(userId) {
   const u = DB.usuarios.find(x => x.id === userId);
   const empId = u?.empresaId;
   DB.usuarios = DB.usuarios.filter(x => x.id !== userId);
-  saveData();
+  deleteRecord('usuarios', userId);
   if (empId) _renderEmpUsersLista(empId);
   toast('Usuário excluído');
 }
@@ -8089,7 +8322,7 @@ function saveCobrancaEmpresa() {
 function deleteCobrancaEmpresa(id) {
   if (!confirm_('Excluir esta cobrança?')) return;
   DB.cobrancasEmpresas = DB.cobrancasEmpresas.filter(x => x.id !== id);
-  saveData();
+  deleteRecord('cobrancasEmpresas', id);
   renderCobrancasEmpresas();
   toast('Cobrança excluída');
 }

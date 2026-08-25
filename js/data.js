@@ -97,7 +97,7 @@ const DB = {
     tiposImovel: ["Apartamento", "Casa", "Sala Comercial", "Cobertura", "Flat", "Loja Comercial", "Apartamento Duplex", "Chácara", "Kitnet"],
     despesasAssociadas: ["IPTU", "Manutenção", "Taxa de Administração", "Água", "Luz"],
     tiposServico: ["Limpeza Geral", "Reparos Hidráulicos", "Pintura", "Manutenção Elétrica", "Limpeza Pós-Obra", "Jardinagem", "Instalação de Ar", "Reparos Elétricos", "Manutenção de Telhado"],
-    statusContrato: ["ATIVO", "ENCERRADO", "SUSPENSO"],
+    statusContrato: ["ATIVO", "ENCERRADO", "ENCERRADO INADIMPLENTE", "SUSPENSO"],
     statusImovel: ["OCUPADO", "DISPONÍVEL", "EM MANUTENÇÃO"],
     statusManutencao: ["Concluído", "Em andamento", "Pendente"],
     camposExtras: {
@@ -451,10 +451,14 @@ function _syncFromServer() {
     const srvRev = (typeof srv._rev === 'number') ? srv._rev : null;
 
     if (srvRev !== null && srvRev !== _dbRev) {
+      const _estavaDefasada = srvRev > _dbRev; // servidor à frente = esta aba estava velha
       // Servidor é a fonte da verdade (protegido por trava _rev) → adota tudo.
       _applyParsedData(srv, true); // grava cache (sem binários) e atualiza _dbRev
       _persistRev(_dbRev);
       _reRenderAtual();
+      if (_estavaDefasada && typeof toast === 'function') {
+        toast('🔄 Tela atualizada — outra aba/usuário alterou os dados.', 'success');
+      }
       return;
     }
 
@@ -587,6 +591,29 @@ function _applyParsedData(parsed, persistLocalStorage) {
 // Promise resolvida quando os dados estiverem prontos (usada em _initApp)
 let _dataReadyResolve;
 const _dataReady = new Promise(resolve => { _dataReadyResolve = resolve; });
+
+// P3: re-sincroniza com o servidor quando a aba volta ao foco/visibilidade ou a
+// conexao volta - reduz a janela de defasagem a ~0, evitando que uma aba antiga
+// perca ou ressuscite registros no proximo save. Nao dispara sem login, com modal
+// aberto (usuario editando), nem em rajada (throttle 3s). Usa _syncFromServer, que
+// adota o estado do servidor com seguranca apenas quando o _rev muda.
+(function _instalarAutoSync() {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return;
+  let _ultimoSync = 0;
+  const _resync = () => {
+    if (document.hidden) return;
+    if (typeof _currentUser === 'undefined' || !_currentUser) return;
+    if (document.querySelector('.modal-overlay.open')) return;
+    const agora = Date.now();
+    if (agora - _ultimoSync < 3000) return;
+    _ultimoSync = agora;
+    try { if (typeof _syncFromServer === 'function') _syncFromServer(); } catch (e) {}
+  };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) _resync(); });
+  window.addEventListener('focus', _resync);
+  window.addEventListener('online', _resync);
+  setInterval(_resync, 20000); // ⏱️ re-sincroniza a cada 20s (mesmo com a aba aberta e parada)
+})();
 
 async function loadData() {
   // 1ª tentativa: localStorage (dados sem binários — carregamento instantâneo)

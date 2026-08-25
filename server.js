@@ -245,6 +245,19 @@ async function backupToMongo(snapshot) {
 // Mescla preservando registros que existem no servidor mas faltam no payload do
 // cliente. Acionado quando o cliente está com _rev defasado: prioriza a versão do
 // cliente para os IDs que ele conhece, mas NUNCA descarta o que ele desconhece.
+// Detecta se o payload do cliente tem MENOS registros que o servidor em alguma
+// colecao de lista - sinal de sobrescrita destrutiva por aba defasada. Nesse
+// caso forcamos safeMerge (uniao) em vez de overwrite cego. Exclusoes legitimas
+// usam /api/record (endpoint granular), que nao passa por aqui.
+function _perdaDeRegistros(serverData, clientData) {
+  for (const k of LIST_KEYS) {
+    const srv = Array.isArray(serverData[k]) ? serverData[k].length : 0;
+    const cli = Array.isArray(clientData[k]) ? clientData[k].length : 0;
+    if (cli < srv) return true;
+  }
+  return false;
+}
+
 function safeMerge(serverData, clientData) {
   const out = { ...serverData, ...clientData };
   for (const k of LIST_KEYS) {
@@ -252,7 +265,8 @@ function safeMerge(serverData, clientData) {
     const cli = Array.isArray(clientData[k]) ? clientData[k] : [];
     if (!srv.length) { out[k] = cli; continue; }
     const byId = new Map();
-    for (const r of cli) byId.set(r.id, r);          // versão nova dos conhecidos
+    const _srvById = new Map(srv.map(r => [r.id, r]));
+    for (const r of cli) { _preservaAnexos(_srvById.get(r.id), r); byId.set(r.id, r); }          // versão nova dos conhecidos
     for (const r of srv) if (!byId.has(r.id)) byId.set(r.id, r); // não perde os demais
     out[k] = Array.from(byId.values());
   }
@@ -294,8 +308,10 @@ app.post('/api/db', async (req, res) => {
         if (serverData) await backupToMongo(serverData); // snapshot ANTES de escrever
 
         let finalData, merged = false;
-        if (!serverData || clientRev === serverRev) {
-          finalData = body;                         // cliente em dia → escrita completa
+        if (!serverData) {
+          finalData = body;
+        } else if (clientRev === serverRev && !_perdaDeRegistros(serverData, body)) {
+          finalData = body;                         // cliente em dia e sem perda → escrita completa
         } else {
           // Cliente defasado OU sem _rev (cache limpo/aba antiga): NUNCA escrita cega.
           // Merge preservando o que o cliente desconhece evita perda em massa.
@@ -330,7 +346,9 @@ app.post('/api/db', async (req, res) => {
     if (serverData) backupToFile(serverData);
 
     let finalData, merged = false;
-    if (!serverData || clientRev === serverRev) {
+    if (!serverData) {
+      finalData = body;
+    } else if (clientRev === serverRev && !_perdaDeRegistros(serverData, body)) {
       finalData = body;
     } else {
       finalData = safeMerge(serverData, body);  // defasado ou sem _rev → merge sem perda
@@ -361,6 +379,19 @@ function maxIdGlobal(data) {
 }
 
 // Aplica um upsert numa cópia do db e devolve o registro final (com id garantido).
+// Blindagem de anexos: nao deixa uma regravacao sem a imagem apagar o comprovante.
+function _temDadosAnexo(c) { return !!(c && String(c.dados || c.data || '').length > 0); }
+function _preservaAnexos(antigo, novo) {
+  if (!antigo || !novo || typeof novo !== 'object') return;
+  const antList = Array.isArray(antigo.comprovantes) ? antigo.comprovantes.filter(_temDadosAnexo) : [];
+  if (!antList.length) return;
+  if (novo.comprovantes === undefined) { novo.comprovantes = antList; return; }
+  const novList = Array.isArray(novo.comprovantes) ? novo.comprovantes : [];
+  if (novList.length && !novList.some(_temDadosAnexo)) {
+    novo.comprovantes = novList.map(nc => antList.find(ac => ac.nome === nc.nome) || nc);
+  }
+}
+
 function applyUpsert(data, collection, record) {
   if (!Array.isArray(data[collection])) data[collection] = [];
   const arr = data[collection];
@@ -375,7 +406,7 @@ function applyUpsert(data, collection, record) {
   }
 
   const idx = arr.findIndex(x => x.id === rec.id);
-  if (idx >= 0) arr[idx] = rec; else arr.push(rec);
+  if (idx >= 0) { _preservaAnexos(arr[idx], rec); arr[idx] = rec; } else arr.push(rec);
   return rec;
 }
 
@@ -702,6 +733,19 @@ app.get('/api/asaas/payments', async (req, res) => {
 app.delete('/api/asaas/payment/:id', async (req, res) => {
   try {
     const data = await asaasRequest('DELETE', `/payments/${req.params.id}`, null, reqAsaasKey(req), reqAsaasEnv(req));
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Receber em dinheiro/pix por fora -> fecha o boleto no Asaas (para de cobrar)
+app.post('/api/asaas/payment/:id/receive-in-cash', async (req, res) => {
+  try {
+    const { paymentDate, value } = req.body || {};
+    const data = await asaasRequest('POST', `/payments/${req.params.id}/receiveInCash`,
+      { paymentDate, value, notifyCustomer: false }, reqAsaasKey(req), reqAsaasEnv(req));
+    if (data && data.errors) return res.json({ ok: false, error: data.errors[0]?.description || 'erro Asaas' });
     res.json({ ok: true, data });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
