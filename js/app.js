@@ -1,5 +1,5 @@
 // ── VERSÃO DO SISTEMA ──────────────────────────────────────
-const APP_VERSION = '2026.07.13-v59';
+const APP_VERSION = '2026.09.29-v61';
 // ────────────────────────────────────────────────────────────
 
 // ── TOLERÂNCIA FINANCEIRA ───────────────────────────────────
@@ -30,16 +30,17 @@ Findo o prazo estipulado, e não havendo manifestação expressa de qualquer das
 
 CLÁUSULA 3 – DO VALOR DO ALUGUEL
 O valor mensal do aluguel será de {{CONTRATO_VALOR}} ({{CONTRATO_VALOR_EXTENSO}}).
+{{CONTRATO_DESCONTO_PROMO_BLOCO}}
 O pagamento deverá ser realizado até o dia {{CONTRATO_DIA_VENCIMENTO}} de cada mês, via boleto bancário enviado todos os meses para o WhatsApp de número {{LOCATARIO_TELEFONE}}, caso mude o número deverá ser informado de imediato.
 
 CLÁUSULA 4 – PAGAMENTO NA ENTRADA DO IMÓVEL
 No ato da assinatura do contrato e entrega das chaves, o LOCATÁRIO pagará:
 1º aluguel: {{CONTRATO_VALOR}}
-1 caução (garantia): {{CONTRATO_CAUCAO_INFO}}
+1 caução (garantia): <strong><u>{{CONTRATO_CAUCAO_INFO}}</u></strong>
 Total pago na entrada: {{CONTRATO_ENTRADA_TOTAL}} ({{CONTRATO_ENTRADA_TOTAL_EXTENSO}}). Pagamento realizado via boleto bancário.
 
 CLÁUSULA 5 – DA CAUÇÃO
-A caução em dinheiro será utilizada como garantia das obrigações contratuais.
+A caução em dinheiro, no valor pago de <strong><u>{{CONTRATO_CAUCAO}}</u></strong>, será utilizada como garantia das obrigações contratuais.
 O valor poderá ser utilizado para:
 pagamento de débitos
 reparo de danos no imóvel
@@ -1610,6 +1611,7 @@ function openInquilinoFicha(id) {
           <div style="text-align:right">
             <div style="font-weight:700">${fmt(c.valorMensal)}<span style="font-size:11px;color:var(--gray-400)">/mês</span></div>
             <span class="badge ${c.status === 'ATIVO' ? 'badge-green' : (c.status || '').startsWith('ENCERRADO') ? 'badge-red' : 'badge-gray'}">${c.status}</span>
+            <div>${_rescSelo(c)}</div>
           </div>
         </div>`).join('');
 
@@ -2138,11 +2140,12 @@ function openImovelFicha(id) {
 
   // Detalhes
   const set = (elId, val) => { const el = document.getElementById(elId); if (el) el.textContent = val || '—'; };
+  const _endIm = enderecoDoImovel(im);
   set('fi-tipo',      im.tipo);
-  set('fi-end',       im.endereco);
-  set('fi-bairro',    im.bairro);
-  set('fi-cidade',    `${im.cidade} - ${im.uf}`);
-  set('fi-cep',       im.cep);
+  set('fi-end',       _endIm.endereco);
+  set('fi-bairro',    _endIm.bairro);
+  set('fi-cidade',    `${_endIm.cidade} - ${_endIm.uf}`);
+  set('fi-cep',       _endIm.cep);
   set('fi-andar',     im.andar);
   set('fi-medidor',   im.medidor);
   set('fi-aluguel',        fmt(im.valorAluguel));
@@ -2695,7 +2698,7 @@ function renderContratos() {
             ${c.renovacoes > 0
               ? `<span class="badge badge-blue" style="margin-left:6px" title="${c.renovacoes}ª renovação">🔄 ${c.renovacoes}x</span>`
               : ''}
-            <div style="margin-top:4px">${vistoriaSelo}${assinaturaSelo}</div>
+            <div style="margin-top:4px">${vistoriaSelo}${assinaturaSelo}${_rescSelo(c)}</div>
           </td>
           <td>${fmtDate(c.dataInicio)}</td>
           <td>${alerta ? `<span class="badge badge-yellow">${fmtDate(c.dataTermino)} ⚠️</span>` : fmtDate(c.dataTermino)}</td>
@@ -2706,9 +2709,12 @@ function renderContratos() {
           <td>
             <div class="actions">
               <button class="btn btn-ghost btn-sm" onclick="gerarContrato(${c.id})">📄 Gerar</button>
+              <button class="btn btn-ghost btn-sm" onclick="abrirVistoriaContrato(${c.id})" title="Abrir o checklist de vistoria (fotos) do imóvel deste contrato">📷 Vistoria</button>
               <button class="btn btn-ghost btn-sm" onclick="enviarContratoParaAssinar(${c.id})" title="Enviar por e-mail o convite para o inquilino assinar (contrato + vistoria)">📤 Enviar p/ assinar</button>
               <button class="btn btn-ghost btn-sm" style="color:#25D366" onclick="enviarContratoWhatsapp(${c.id})" title="Enviar contrato via WhatsApp">📱 WhatsApp</button>
               ${_podeAcao('contratos','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openContrato(${c.id})">Editar</button>` : ''}
+              ${_podeAcao('contratos','editar') && !c.rescisao && (c.status === 'ATIVO' || c.status === 'SUSPENSO') ? `<button class="btn btn-ghost btn-sm" style="color:#dc2626" onclick="openRescisao(${c.id})" title="Encerrar / rescindir contrato (motivo, multa, caução, parcelas futuras)">🚪 Encerrar</button>` : ''}
+              ${c.rescisao ? `<button class="btn btn-ghost btn-sm" onclick="gerarTermoRescisao(${c.id})" title="Termo de rescisão (imprimir / PDF)">📄 Termo</button>` : ''}
               ${_podeAcao('contratos','excluir') ? `<button class="btn btn-danger btn-sm" onclick="deleteContrato(${c.id})">Excluir</button>` : ''}
             </div>
           </td>
@@ -2867,6 +2873,8 @@ function openContrato(id = null) {
     form.dataInicio.value = c.dataInicio;
     form.dataTermino.value = c.dataTermino;
     form.valorMensal.value = c.valorMensal;
+    form.elements['descontoPromoValor'].value = c.descontoPromoValor || '';
+    form.elements['descontoPromoMeses'].value = c.descontoPromoMeses || '';
     form.ajustes.value = c.ajustes;
     form.status.value = c.status;
     form.elements['dataContrato'].value           = c.dataContrato           || '';
@@ -2995,6 +3003,8 @@ async function saveContrato() {
     dataInicio: form.dataInicio.value,
     dataTermino: form.dataTermino.value,
     valorMensal: parseFloat(form.valorMensal.value) || 0,
+    descontoPromoValor: parseFloat(form.elements['descontoPromoValor'].value) || 0,
+    descontoPromoMeses: parseInt(form.elements['descontoPromoMeses'].value) || 0,
     ajustes: form.ajustes.value.trim(),
     status: form.status.value,
     dataContrato:          form.elements['dataContrato'].value,
@@ -3322,6 +3332,17 @@ async function deleteContrato(id) {
 // Localiza o checklist de vistoria do inquilino/imóvel do contrato.
 // Regra: filtra pelos do imóvel do contrato; se nenhum casar, cai pra todos
 // do inquilino; devolve sempre o mais RECENTE por vinculadoEm.
+// Atalho do botão "📷 Vistoria" na lista de Contratos: abre direto o checklist
+// de fotos do imóvel vinculado a este contrato (mesmo modal usado em Imóveis).
+function abrirVistoriaContrato(contratoId) {
+  const c = DB.contratos.find(x => x.id === contratoId);
+  if (!c) return;
+  const normNome = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const im = DB.imoveis.find(i => normNome(i.nome) === normNome(c.imovel));
+  if (!im) { toast(`Imóvel "${c.imovel}" não encontrado no cadastro`, 'error'); return; }
+  openChecklistFotos(im.id);
+}
+
 function _vistoriaDoContrato(c) {
   if (!c) return null;
   const normNome = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -3360,6 +3381,22 @@ function _anexoVistoriaHtml(ck) {
   return cab + cards;
 }
 
+// Prédio manda no endereço: a unidade guarda só o identificador (nome/apto);
+// endereço, bairro, cidade, uf e cep vêm do PRÉDIO vinculado (predioId).
+// Fallback para os dados da própria unidade se ela não tiver prédio.
+function enderecoDoImovel(imo) {
+  if (!imo) return { endereco:'', bairro:'', cidade:'', uf:'', cep:'' };
+  const p = imo.predioId ? (DB.predios || []).find(x => x.id === imo.predioId) : null;
+  const src = (p && p.endereco) ? p : imo;
+  return {
+    endereco: src.endereco || '',
+    bairro:   src.bairro   || '',
+    cidade:   src.cidade   || '',
+    uf:       src.uf       || '',
+    cep:      src.cep      || '',
+  };
+}
+
 function gerarContrato(id) {
   const c = DB.contratos.find(x => x.id === id);
   if (!c) return;
@@ -3392,8 +3429,9 @@ function gerarContrato(id) {
     if (_fim.getDate() < d1.getDate()) prazoMeses -= 1;
   }
 
-  // Endereço completo do imóvel
-  const endParts = [imo.endereco, imo.bairro, imo.cidade&&imo.uf ? imo.cidade+' - '+imo.uf : imo.cidade, imo.cep ? 'CEP '+imo.cep : ''].filter(Boolean);
+  // Endereço completo do imóvel — prédio manda; a unidade entra separada em {{IMOVEL_NOME}}
+  const endImo = enderecoDoImovel(imo);
+  const endParts = [endImo.endereco, endImo.bairro, endImo.cidade&&endImo.uf ? endImo.cidade+' - '+endImo.uf : endImo.cidade, endImo.cep ? 'CEP '+endImo.cep : ''].filter(Boolean);
   const endCompleto = endParts.join(', ') || c.imovel;
 
   const caucao         = parseFloat(c.caucao)   || 0;
@@ -3415,6 +3453,19 @@ function gerarContrato(id) {
   }
   const taxaAgua  = parseFloat(c.taxaAgua) || 0;
   const entrada   = (c.valorMensal || 0) + caucao;
+
+  // Desconto promocional nos N primeiros meses (ex.: 6 meses com R$100 de abatimento)
+  const _NUM_EXT = {1:'um',2:'dois',3:'três',4:'quatro',5:'cinco',6:'seis',7:'sete',8:'oito',9:'nove',10:'dez',11:'onze',12:'doze'};
+  const numExt = n => _NUM_EXT[n] || String(n);
+  const descontoPromoValor = parseFloat(c.descontoPromoValor) || 0;
+  const descontoPromoMeses = parseInt(c.descontoPromoMeses) || 0;
+  const temDescontoPromo   = descontoPromoValor > 0 && descontoPromoMeses > 0;
+  const valorComDesconto   = Math.max(0, (c.valorMensal || 0) - descontoPromoValor);
+  const descontoPromoBloco = temDescontoPromo
+    ? `<strong><u>Fica concedido desconto promocional de ${fmt(descontoPromoValor)} (${valorPorExtenso(descontoPromoValor)}) nos ${descontoPromoMeses} (${numExt(descontoPromoMeses)}) primeiros meses de contrato, período em que o valor mensal do aluguel será de ${fmt(valorComDesconto)} (${valorPorExtenso(valorComDesconto)}). A partir do ${descontoPromoMeses + 1}º mês, o valor do aluguel retorna integralmente a ${fmt(c.valorMensal)} (${valorPorExtenso(c.valorMensal)}).</u></strong>\n`
+      + `1º ao ${descontoPromoMeses}º mês: <strong><u>${fmt(valorComDesconto)}/mês</u></strong>\n`
+      + `A partir do ${descontoPromoMeses + 1}º mês: <strong><u>${fmt(c.valorMensal)}/mês</u></strong>`
+    : '';
 
   // Data do contrato por extenso: "10 de maio de 2026"
   const mesesNome = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -3447,8 +3498,8 @@ function gerarContrato(id) {
     '{{LOCATARIO_REPRESENTANTE_CARGO}}':inq.cargoRepresentante|| '',
     '{{IMOVEL_NOME}}':        c.imovel || '',
     '{{IMOVEL_ENDERECO}}':    endCompleto,
-    '{{IMOVEL_BAIRRO}}':      imo.bairro || '',
-    '{{IMOVEL_CIDADE}}':      imo.cidade || '',
+    '{{IMOVEL_BAIRRO}}':      endImo.bairro || '',
+    '{{IMOVEL_CIDADE}}':      endImo.cidade || '',
     '{{CONTRATO_CODIGO}}':    c.codigo || '',
     '{{CONTRATO_INICIO}}':    fmtDate(c.dataInicio),
     '{{CONTRATO_TERMINO}}':   fmtDate(c.dataTermino),
@@ -3462,6 +3513,11 @@ function gerarContrato(id) {
     })(),
     '{{CONTRATO_VALOR}}':     fmt(c.valorMensal),
     '{{CONTRATO_VALOR_EXTENSO}}': valorPorExtenso(c.valorMensal),
+    '{{CONTRATO_DESCONTO_PROMO_BLOCO}}':  descontoPromoBloco,
+    '{{CONTRATO_DESCONTO_VALOR}}':        fmt(descontoPromoValor),
+    '{{CONTRATO_DESCONTO_MESES}}':        String(descontoPromoMeses),
+    '{{CONTRATO_VALOR_COM_DESCONTO}}':    fmt(valorComDesconto),
+    '{{CONTRATO_VALOR_COM_DESCONTO_EXTENSO}}': valorPorExtenso(valorComDesconto),
     '{{CONTRATO_DIA_VENCIMENTO}}': String(c.diaVencimento || 10),
     '{{CONTRATO_DATA}}':      fmtDate(c.dataContrato),
     '{{CONTRATO_LOCAL_DATA}}': localData,
@@ -3692,6 +3748,11 @@ const CT_CAMPOS = {
     ['{{CONTRATO_PRAZO_MESES}}',         'Prazo em meses'],
     ['{{CONTRATO_VALOR}}',               'Valor mensal (R$)'],
     ['{{CONTRATO_VALOR_EXTENSO}}',       'Valor por extenso'],
+    ['{{CONTRATO_DESCONTO_PROMO_BLOCO}}',      'Cláusula do desconto promocional (negrito/sublinhado, vazio se não houver)'],
+    ['{{CONTRATO_DESCONTO_VALOR}}',            'Valor do desconto promocional (R$)'],
+    ['{{CONTRATO_DESCONTO_MESES}}',            'Nº de meses com desconto'],
+    ['{{CONTRATO_VALOR_COM_DESCONTO}}',        'Valor do aluguel já com desconto (R$)'],
+    ['{{CONTRATO_VALOR_COM_DESCONTO_EXTENSO}}','Valor com desconto por extenso'],
     ['{{CONTRATO_DIA_VENCIMENTO}}',      'Dia de vencimento'],
     ['{{CONTRATO_DATA}}',                'Data do contrato'],
     ['{{CONTRATO_LOCAL_DATA}}',          'Local e data por extenso'],
@@ -3855,6 +3916,13 @@ function finToggleTodos() {
   renderFinanceiro();
 }
 
+// Clique no card "Em Atraso": liga "Todos os períodos" (senão o filtro de mês
+// esconde os vencidos de outros meses) e ativa a pill "Atrasado" na tabela.
+function finFiltrarAtrasados() {
+  document.getElementById('fin-btn-todos')?.classList.add('active');
+  setFilterPill('fin-filter-bar', 'ATRASADO', renderFinanceiro);
+}
+
 function renderFinanceiro() {
   finInitPeriodo();
   const btnSync = document.getElementById('btn-sync-asaas');
@@ -3899,6 +3967,10 @@ function renderFinanceiro() {
       if (statusPagFilter === 'PAGO')     return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && _finCobre(rec, tot) && tot > 0;
       if (statusPagFilter === 'PARCIAL')  return (f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED') && _finParcial(rec, tot);
       if (statusPagFilter === 'BAIXA_MANUAL') return f.baixaManual === true && f.asaasStatus !== 'RECEIVED' && f.asaasStatus !== 'CONFIRMED';
+      if (statusPagFilter === 'ATRASADO') {
+        const pg = f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED';
+        return !pg && tot > 0 && f.dataPagamento < today();
+      }
       return true;
     });
   }
@@ -3983,12 +4055,13 @@ function renderFinanceiro() {
         <td>
           <strong><span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.contrato)},renderFinanceiro)" title="Filtrar por este contrato">${f.contrato}</span></strong>
           ${f.tipo === 'caucao' ? `<br><span class="badge badge-yellow" style="font-size:10px;margin-top:2px">🔒 ${f.observacoes || 'Caução'}</span>` : ''}
+          ${f.tipo === 'multa_rescisoria' ? `<br><span class="badge badge-orange" style="font-size:10px;margin-top:2px" title="${(f.observacoes || '').replace(/"/g, '&quot;')}">⚖️ Multa rescisória</span>` : ''}
         </td>
         <td>${f._unidade
               ? `<span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f._unidade)},renderFinanceiro)" title="Filtrar por esta unidade">🏠 ${f._unidade}</span>`
               : '<span style="color:var(--gray-400)">—</span>'}</td>
         <td>${f.inquilino ? `<span class="filtro-click" onclick="_filtrarPor('fin-search',${JSON.stringify(f.inquilino)},renderFinanceiro)" title="Filtrar por este inquilino">${f.inquilino}</span>` : '—'}${_emAtraso ? `<span style="font-size:11px;font-weight:700;margin-left:6px;padding:2px 7px;border-radius:5px;background:#e02424;color:#fff;white-space:nowrap">⚠️ EM ATRASO ${_diasAtraso}d</span>` : ''}</td>
-        <td>${f.tipo === 'caucao' ? `<span style="color:var(--gray-400);font-size:11px">—</span>` : fmt(f.valorContrato)}</td>
+        <td>${(f.tipo === 'caucao' || f.tipo === 'multa_rescisoria') ? `<span style="color:var(--gray-400);font-size:11px">—</span>` : fmt(f.valorContrato)}</td>
         <td>${(f.consumoAgua || 0) > 0 ? fmt(f.consumoAgua) : '—'}</td>
         <td>${(f.totalEnergia || 0) > 0 ? fmt(f.totalEnergia) : '—'}</td>
         <td>${((f.valorMulta || 0) > 0 || (f.valorMora || 0) > 0)
@@ -5713,6 +5786,9 @@ async function gerarBoleto(finId) {
     // Referência no topo das instruções
     const _fmt2 = v => Number(v).toFixed(2).replace('.', ',');
     const _nomeLoc = _asaasEmpConfig().nomeBeneficiario || DB.config.locador?.nome || 'Locador';
+    // Multa rescisória: o valor vive em taxasExtras — só troca o rótulo impresso no boleto
+    const _ehMultaResc = f.tipo === 'multa_rescisoria';
+    const _lblExtras = _ehMultaResc ? 'Multa rescisoria (clausula 19)' : 'Taxas Extras';
 
     // Competência (mês/ano de referência) derivada da data de vencimento
     const _MESES = ['JANEIRO','FEVEREIRO','MARCO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];
@@ -5742,8 +5818,8 @@ async function gerarBoleto(finId) {
       linhasInst.push(`Taxa de Manutencao: R$ ${_fmt2(f.taxaManutencao)}`);
     }
     if ((f.taxasExtras || 0) > 0) {
-      linhasObs.push(`Taxas Extras: R$ ${_fmt2(f.taxasExtras)}`);
-      linhasInst.push(`Taxas Extras: R$ ${_fmt2(f.taxasExtras)}`);
+      linhasObs.push(`${_lblExtras}: R$ ${_fmt2(f.taxasExtras)}`);
+      linhasInst.push(`${_lblExtras}: R$ ${_fmt2(f.taxasExtras)}`);
     }
     if ((f.totalEnergia || 0) > 0) {
       const kwh = Math.max(0, (f.leituraAtual||0) - (f.leituraAnterior||0));
@@ -5776,7 +5852,7 @@ async function gerarBoleto(finId) {
     const _unidade = contrato?.imovel || f.contrato;
     const _ehCaucao = f.tipo === 'caucao';
     // Rótulo: caução usa as observações ("Caução 1/2"); cobrança normal usa "Aluguel"
-    const _rotulo = _ehCaucao ? (f.observacoes || 'Caução') : 'Aluguel';
+    const _rotulo = _ehCaucao ? (f.observacoes || 'Caução') : (_ehMultaResc ? 'Multa rescisória' : 'Aluguel');
 
     // Discriminação compacta dos valores para o description (único campo impresso pelo Asaas)
     let _discrimCurta = '';
@@ -5788,7 +5864,7 @@ async function gerarBoleto(finId) {
       if ((f.valorContrato  || 0) > 0) _descParts.push(`Aluguel R$ ${_fmt2(f.valorContrato)}`);
       if ((f.consumoAgua    || 0) > 0) _descParts.push(`Água R$ ${_fmt2(f.consumoAgua)}`);
       if ((f.taxaManutencao || 0) > 0) _descParts.push(`Manutenção R$ ${_fmt2(f.taxaManutencao)}`);
-      if ((f.taxasExtras    || 0) > 0) _descParts.push(`Extras R$ ${_fmt2(f.taxasExtras)}`);
+      if ((f.taxasExtras    || 0) > 0) _descParts.push(`${_ehMultaResc ? 'Multa rescisória' : 'Extras'} R$ ${_fmt2(f.taxasExtras)}`);
       if ((f.totalEnergia   || 0) > 0) {
         const _kwh = Math.max(0, (f.leituraAtual || 0) - (f.leituraAnterior || 0));
         const _dEner = (f.descontoEnergia || 0) > 0 ? ` (-${f.descontoEnergia}%)` : '';
@@ -6135,11 +6211,11 @@ const REL_TIPOS = {
       let l = [..._myData(DB.imoveis)];
       const s = document.getElementById('rf-imo-status')?.value;
       if (s) l = l.filter(i => i.status === s);
-      return l.map(i => [
-        i.nome, i.tipo || '—', i.endereco || '—', i.bairro || '—',
-        i.cidade || '—', i.uf || '—',
+      return l.map(i => { const e = enderecoDoImovel(i); return [
+        i.nome, i.tipo || '—', e.endereco || '—', e.bairro || '—',
+        e.cidade || '—', e.uf || '—',
         _fmtN(i.valorAluguel), _fmtN(i.taxaAgua), _fmtN(i.taxaManutencao), i.status
-      ]);
+      ]; });
     }
   },
 
@@ -6176,6 +6252,7 @@ const REL_TIPOS = {
           <option value="">Todos</option>
           <option value="ATIVO">Ativo</option>
           <option value="ENCERRADO">Encerrado</option>
+          <option value="ENCERRADO INADIMPLENTE">Encerrado Inadimplente</option>
           <option value="SUSPENSO">Suspenso</option>
         </select>
       </div>
@@ -6322,6 +6399,7 @@ const REL_TIPOS = {
           <option value="">Todos</option>
           <option value="ATIVO">Ativo</option>
           <option value="ENCERRADO">Encerrado</option>
+          <option value="ENCERRADO INADIMPLENTE">Encerrado Inadimplente</option>
           <option value="SUSPENSO">Suspenso</option>
         </select>
       </div>`,
@@ -8372,4 +8450,479 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', _initApp);
 } else {
   _initApp();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RESCISÃO ANTECIPADA / ENCERRAMENTO DE CONTRATO
+// Botão "🚪 Encerrar" na aba Contratos → modal com: data da saída, motivo,
+// multa rescisória (cláusula 19: 1 aluguel proporcional ao período restante),
+// destino da caução, parcelas futuras (cancela boleto Asaas + remove pendentes,
+// PAGAS ficam intactas), pro-rata opcional e status final.
+// Tudo fica gravado em contrato.rescisao + auditoria. Gera Termo de Rescisão.
+// ══════════════════════════════════════════════════════════════════════════════
+const RESC_MOTIVOS = [
+  'Pedido do inquilino', 'Inadimplência', 'Acordo entre as partes',
+  'Venda do imóvel', 'Uso próprio do locador', 'Descumprimento contratual',
+  'Fim do prazo (não renovado)', 'Outro',
+];
+const RESC_MULTA_LABEL = {
+  A_COBRAR: 'A cobrar', PAGA: 'Paga', ABATIDA_CAUCAO: 'Abatida da caução', ISENTA: 'Isenta',
+};
+const RESC_CAUCAO_LABEL = {
+  DEVOLVIDA: 'Devolvida integralmente', PARCIAL: 'Devolução parcial',
+  RETIDA: 'Retida integralmente', NAO_SE_APLICA: 'Não se aplica',
+};
+
+function _rescFinPago(f) {
+  return !!(f.baixaManual || f.asaasStatus === 'RECEIVED' || f.asaasStatus === 'CONFIRMED' || (f.valorRecebido || 0) > 0);
+}
+function _rescDias(a, b) {
+  if (!a || !b) return 0;
+  return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000);
+}
+function _rescNum(id) { return parseFloat(document.getElementById(id)?.value) || 0; }
+function _rescVal(id) { return (document.getElementById(id)?.value || '').trim(); }
+function _rescEsc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+// Multa da cláusula 19: 1 aluguel vigente × (dias restantes ÷ dias totais do contrato)
+function _rescCalcMulta(c, dataSaida) {
+  const aluguel = parseFloat(c.valorMensal) || 0;
+  if (!c.dataInicio || !c.dataTermino || !dataSaida) return { valor: aluguel, restantes: 0, totais: 0, aluguel };
+  const totais    = Math.max(1, _rescDias(c.dataInicio, c.dataTermino) + 1);
+  const restantes = Math.max(0, Math.min(totais, _rescDias(dataSaida, c.dataTermino)));
+  return { valor: _round2(aluguel * restantes / totais), restantes, totais, aluguel };
+}
+
+// Pro-rata do mês da saída: (aluguel + taxas fixas) × dias ocupados ÷ dias do mês
+function _rescCalcProRata(c, dataSaida) {
+  if (!dataSaida) return { valor: 0, dias: 0, diasMes: 30 };
+  const d = new Date(dataSaida + 'T12:00:00');
+  const diasMes = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  const dias = d.getDate();
+  const base = (parseFloat(c.valorMensal) || 0) + (parseFloat(c.taxaAgua) || 0) + (parseFloat(c.taxaManutencao) || 0) + (parseFloat(c.taxasExtras) || 0);
+  return { valor: _round2(base * dias / diasMes), dias, diasMes, base };
+}
+
+// Parcelas do contrato ainda não pagas (exclui caução e multa), por vencimento
+function _rescParcelasPendentes(c) {
+  return _myData(DB.financeiro)
+    .filter(f => f.contrato === c.codigo && f.tipo !== 'caucao' && f.tipo !== 'multa_rescisoria'
+              && !_rescFinPago(f) && (f.totalGeral || f.valorContrato || 0) > 0)
+    .sort((a, b) => (a.dataPagamento || '').localeCompare(b.dataPagamento || ''));
+}
+// Caução efetivamente recebida (soma das entradas de caução pagas)
+function _rescCaucaoRecebida(c) {
+  return _round2(_myData(DB.financeiro)
+    .filter(f => f.contrato === c.codigo && f.tipo === 'caucao' && _rescFinPago(f))
+    .reduce((s, f) => s + (parseFloat(f.valorRecebido) || parseFloat(f.caucaoValor) || 0), 0));
+}
+
+function openRescisao(id) {
+  if (!_podeAcao('contratos', 'editar')) { toast('Sem permissão para encerrar contratos', 'error'); return; }
+  const c = DB.contratos.find(x => x.id === id);
+  if (!c) return;
+  if (c.rescisao) { toast('Este contrato já foi encerrado. Use "📄 Termo" para ver o registro.', 'error'); return; }
+  const modal = document.getElementById('modal-rescisao');
+  modal.dataset.id = id;
+
+  document.getElementById('resc-titulo').textContent = `🚪 Encerrar contrato ${c.codigo}`;
+  const caucaoRec = _rescCaucaoRecebida(c);
+  document.getElementById('resc-resumo').innerHTML = `
+    <div class="renov-resumo-row"><span>Imóvel</span><strong>${_rescEsc(c.imovel)}</strong></div>
+    <div class="renov-resumo-row"><span>Inquilino</span><strong>${_rescEsc(c.inquilino || '—')}</strong></div>
+    <div class="renov-resumo-row"><span>Vigência</span><strong>${fmtDate(c.dataInicio)} → ${fmtDate(c.dataTermino)}</strong></div>
+    <div class="renov-resumo-row"><span>Aluguel vigente</span><strong>${fmt(c.valorMensal)}</strong></div>
+    <div class="renov-resumo-row"><span>Caução contratada / recebida</span><strong>${fmt(c.caucao || 0)} / ${fmt(caucaoRec)}</strong></div>`;
+
+  document.getElementById('resc-motivo').innerHTML = RESC_MOTIVOS.map(m => `<option value="${m}">${m}</option>`).join('');
+  document.getElementById('resc-motivo-detalhe').value = '';
+  const dataSaida = document.getElementById('resc-data-saida');
+  dataSaida.value = today();
+  dataSaida.min = c.dataInicio || '';
+
+  document.getElementById('resc-multa-aplicar').checked = true;
+  document.getElementById('resc-multa-valor').dataset.manual = '';
+  document.getElementById('resc-multa-situacao').value = 'A_COBRAR';
+  document.getElementById('resc-multa-venc').value = today();
+  document.getElementById('resc-multa-data-pgto').value = today();
+  document.getElementById('resc-multa-forma').value = '';
+  document.getElementById('resc-multa-justificativa').value = '';
+  const chkBoleto = document.getElementById('resc-multa-boleto');
+  chkBoleto.checked = false;
+  chkBoleto.disabled = !_asaasAtivo();
+  document.getElementById('resc-multa-boleto-wrap').title = _asaasAtivo() ? '' : 'Integração Asaas não está ativa nesta empresa';
+
+  const temCaucao = (parseFloat(c.caucao) || 0) > 0 || caucaoRec > 0;
+  document.getElementById('resc-caucao-section').style.display = temCaucao ? '' : 'none';
+  document.getElementById('resc-caucao-destino').value = temCaucao ? 'DEVOLVIDA' : 'NAO_SE_APLICA';
+  document.getElementById('resc-caucao-valor-dev').value = caucaoRec || c.caucao || 0;
+  document.getElementById('resc-caucao-obs').value = '';
+
+  document.getElementById('resc-prorata-aplicar').checked = false;
+  document.getElementById('resc-prorata-valor').dataset.manual = '';
+  document.getElementById('resc-status').value = 'ENCERRADO';
+  document.getElementById('resc-status').dataset.manual = '';
+  document.getElementById('resc-obs').value = '';
+
+  _rescRenderParcelas(c, dataSaida.value);
+  _rescAtualizar();
+  modal.classList.add('open');
+}
+
+// Lista as parcelas pendentes com checkbox (marcadas por padrão as que vencem APÓS a saída)
+function _rescRenderParcelas(c, dataSaida) {
+  const pend = _rescParcelasPendentes(c);
+  const wrap = document.getElementById('resc-parcelas');
+  if (!pend.length) {
+    wrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px;margin:0">Nenhuma parcela pendente neste contrato.</p>';
+    return;
+  }
+  const hoje = today();
+  wrap.innerHTML = pend.map(f => {
+    const futura  = (f.dataPagamento || '') > dataSaida;
+    const atraso  = (f.dataPagamento || '') < hoje;
+    const boleto  = f.asaasPaymentId && f.asaasStatus !== 'CANCELED' ? ' <span class="badge badge-blue" style="font-size:10px">🏦 boleto Asaas</span>' : '';
+    const tag     = atraso ? ' <span class="badge badge-red" style="font-size:10px">EM ATRASO</span>' : (futura ? ' <span class="badge badge-gray" style="font-size:10px">futura</span>' : '');
+    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--gray-200);font-size:13px;cursor:pointer">
+      <input type="checkbox" class="resc-parc-chk" value="${f.id}" ${futura ? 'checked' : ''} onchange="_rescAtualizar()">
+      <span style="min-width:90px">${fmtDate(f.dataPagamento)}</span>
+      <strong style="min-width:100px">${fmt(f.totalGeral || f.valorContrato || 0)}</strong>
+      <span style="flex:1;color:var(--gray-500);font-size:12px">${_rescEsc((f.observacoes || '').split('\n')[0])}</span>${boleto}${tag}
+    </label>`;
+  }).join('');
+}
+
+// Recalcula multa, pro-rata, contadores e sugestão de status a cada mudança do modal
+function _rescAtualizar() {
+  const modal = document.getElementById('modal-rescisao');
+  const c = DB.contratos.find(x => x.id === parseInt(modal.dataset.id));
+  if (!c) return;
+  const dataSaida = _rescVal('resc-data-saida');
+
+  // Multa (cláusula 19) — recalcula só se o usuário não editou o valor à mão
+  const m = _rescCalcMulta(c, dataSaida);
+  const multaEl = document.getElementById('resc-multa-valor');
+  if (!multaEl.dataset.manual) multaEl.value = m.valor.toFixed(2);
+  document.getElementById('resc-multa-hint').textContent = m.totais
+    ? `Cláusula 19: 1 aluguel (${fmt(m.aluguel)}) × ${m.restantes} dias restantes ÷ ${m.totais} dias do contrato = ${fmt(m.valor)}`
+    : 'Contrato sem datas de início/término — informe o valor manualmente.';
+  const aplicar = document.getElementById('resc-multa-aplicar').checked;
+  document.getElementById('resc-multa-detalhe').style.display = aplicar ? '' : 'none';
+  const sit = _rescVal('resc-multa-situacao');
+  document.getElementById('resc-multa-acobrar').style.display = sit === 'A_COBRAR' ? '' : 'none';
+  document.getElementById('resc-multa-paga').style.display    = sit === 'PAGA' ? '' : 'none';
+  document.getElementById('resc-multa-isenta').style.display  = sit === 'ISENTA' ? '' : 'none';
+  const optAbat = document.querySelector('#resc-multa-situacao option[value="ABATIDA_CAUCAO"]');
+  const temCaucao = document.getElementById('resc-caucao-section').style.display !== 'none';
+  if (optAbat) optAbat.disabled = !temCaucao;
+
+  // Caução
+  const dest = _rescVal('resc-caucao-destino');
+  document.getElementById('resc-caucao-parcial').style.display = dest === 'PARCIAL' ? '' : 'none';
+
+  // Pro-rata
+  const pr = _rescCalcProRata(c, dataSaida);
+  const prEl = document.getElementById('resc-prorata-valor');
+  if (!prEl.dataset.manual) prEl.value = pr.valor.toFixed(2);
+  document.getElementById('resc-prorata-hint').textContent =
+    `${fmt(pr.base || 0)} × ${pr.dias} dias ocupados ÷ ${pr.diasMes} dias do mês = ${fmt(pr.valor)}. Marque só se o mês da saída ainda não foi cobrado.`;
+  document.getElementById('resc-prorata-detalhe').style.display = document.getElementById('resc-prorata-aplicar').checked ? '' : 'none';
+
+  // Parcelas selecionadas / boletos
+  const sel = _rescParcelasSelecionadas();
+  const comBoleto = sel.filter(f => f.asaasPaymentId && f.asaasStatus !== 'CANCELED').length;
+  document.getElementById('resc-parcelas-resumo').textContent = sel.length
+    ? `${sel.length} parcela(s) será(ão) removida(s)${comBoleto ? ` e ${comBoleto} boleto(s) cancelado(s) no Asaas` : ''}. Parcelas pagas nunca são tocadas.`
+    : 'Nenhuma parcela selecionada — todas as pendentes continuam em aberto.';
+
+  // Sugestão de status: sobra parcela vencida sem pagamento → ENCERRADO INADIMPLENTE
+  const hoje = today();
+  const selIds = new Set(sel.map(f => f.id));
+  const restamAtrasadas = _rescParcelasPendentes(c).filter(f => !selIds.has(f.id) && (f.dataPagamento || '') < hoje);
+  const stEl = document.getElementById('resc-status');
+  const sugerido = restamAtrasadas.length ? 'ENCERRADO INADIMPLENTE' : 'ENCERRADO';
+  if (!stEl.dataset.manual) stEl.value = sugerido;
+  document.getElementById('resc-status-hint').textContent = restamAtrasadas.length
+    ? `Sugestão: ENCERRADO INADIMPLENTE — ${restamAtrasadas.length} parcela(s) vencida(s) continua(m) em aberto (${fmt(restamAtrasadas.reduce((s, f) => s + (f.totalGeral || f.valorContrato || 0), 0))}).`
+    : 'Sugestão: ENCERRADO — nenhuma parcela vencida ficará em aberto.';
+}
+function _rescParcelasSelecionadas() {
+  const ids = [...document.querySelectorAll('.resc-parc-chk:checked')].map(el => parseInt(el.value));
+  return DB.financeiro.filter(f => ids.includes(f.id));
+}
+function _rescDataSaidaMudou() {
+  const modal = document.getElementById('modal-rescisao');
+  const c = DB.contratos.find(x => x.id === parseInt(modal.dataset.id));
+  if (c) _rescRenderParcelas(c, _rescVal('resc-data-saida'));
+  _rescAtualizar();
+}
+
+async function confirmarRescisao() {
+  const modal = document.getElementById('modal-rescisao');
+  const id = parseInt(modal.dataset.id);
+  const idx = DB.contratos.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  const c = DB.contratos[idx];
+
+  // ── Leitura + validação ──
+  const dataSaida = _rescVal('resc-data-saida');
+  if (!dataSaida) { toast('Informe a data efetiva da saída', 'error'); return; }
+  if (c.dataInicio && dataSaida < c.dataInicio) { toast('Data da saída não pode ser anterior ao início do contrato', 'error'); return; }
+  const motivo = _rescVal('resc-motivo');
+  const motivoDetalhe = _rescVal('resc-motivo-detalhe');
+  if (motivo === 'Outro' && !motivoDetalhe) { toast('Descreva o motivo em "Detalhes"', 'error'); return; }
+
+  const multaAplicar = document.getElementById('resc-multa-aplicar').checked;
+  const multaValor   = multaAplicar ? _round2(_rescNum('resc-multa-valor')) : 0;
+  const multaSit     = multaAplicar ? _rescVal('resc-multa-situacao') : 'ISENTA';
+  const multaVenc    = _rescVal('resc-multa-venc');
+  const multaDataPg  = _rescVal('resc-multa-data-pgto');
+  const multaForma   = _rescVal('resc-multa-forma');
+  const multaJust    = _rescVal('resc-multa-justificativa');
+  const multaBoleto  = document.getElementById('resc-multa-boleto').checked && _asaasAtivo();
+  if (multaAplicar && multaSit !== 'ISENTA' && multaValor <= 0) { toast('Valor da multa deve ser maior que zero (ou marque como isenta)', 'error'); return; }
+  if (multaAplicar && multaSit === 'A_COBRAR' && !multaVenc) { toast('Informe o vencimento da multa', 'error'); return; }
+  if (multaAplicar && multaSit === 'PAGA' && !multaDataPg) { toast('Informe a data em que a multa foi paga', 'error'); return; }
+  if (multaAplicar && multaSit === 'ISENTA' && !multaJust) { toast('Informe a justificativa da isenção da multa', 'error'); return; }
+
+  const temCaucao = document.getElementById('resc-caucao-section').style.display !== 'none';
+  const caucaoDestino = temCaucao ? _rescVal('resc-caucao-destino') : 'NAO_SE_APLICA';
+  const caucaoBase    = _rescCaucaoRecebida(c) || parseFloat(c.caucao) || 0;
+  let caucaoDevolvido = 0;
+  if (caucaoDestino === 'DEVOLVIDA') caucaoDevolvido = caucaoBase;
+  if (caucaoDestino === 'PARCIAL')   caucaoDevolvido = _round2(_rescNum('resc-caucao-valor-dev'));
+  if (caucaoDestino === 'PARCIAL' && (caucaoDevolvido <= 0 || caucaoDevolvido >= caucaoBase)) { toast(`Devolução parcial deve ficar entre R$ 0,01 e ${fmt(caucaoBase)}`, 'error'); return; }
+  const caucaoRetido = _round2(Math.max(0, caucaoBase - caucaoDevolvido));
+  const caucaoObs    = _rescVal('resc-caucao-obs');
+
+  const proRataAplicar = document.getElementById('resc-prorata-aplicar').checked;
+  const proRataValor   = proRataAplicar ? _round2(_rescNum('resc-prorata-valor')) : 0;
+  if (proRataAplicar && proRataValor <= 0) { toast('Valor do pro-rata deve ser maior que zero', 'error'); return; }
+  const proRataInfo = _rescCalcProRata(c, dataSaida);
+
+  const statusFinal = _rescVal('resc-status') || 'ENCERRADO';
+  const obs = _rescVal('resc-obs');
+  const parcelasSel = _rescParcelasSelecionadas();
+  const comBoleto = parcelasSel.filter(f => f.asaasPaymentId && f.asaasStatus !== 'CANCELED');
+
+  const resumo = [
+    `Encerrar o contrato ${c.codigo} (${c.inquilino || ''}) em ${fmtDate(dataSaida)}?`,
+    ``,
+    `• Motivo: ${motivo}${motivoDetalhe ? ' — ' + motivoDetalhe : ''}`,
+    `• Multa: ${multaAplicar && multaSit !== 'ISENTA' ? fmt(multaValor) + ' (' + RESC_MULTA_LABEL[multaSit] + ')' : 'isenta / não aplicada'}`,
+    temCaucao ? `• Caução: ${RESC_CAUCAO_LABEL[caucaoDestino]}${caucaoDevolvido ? ' — devolver ' + fmt(caucaoDevolvido) : ''}${caucaoRetido && caucaoDestino !== 'DEVOLVIDA' ? ' — reter ' + fmt(caucaoRetido) : ''}` : null,
+    proRataAplicar ? `• Pro-rata do mês da saída: ${fmt(proRataValor)} (nova cobrança)` : null,
+    `• Parcelas pendentes removidas: ${parcelasSel.length}${comBoleto.length ? ' (' + comBoleto.length + ' boleto(s) cancelado(s) no Asaas)' : ''}`,
+    `• Status final: ${statusFinal}`,
+    ``,
+    `Parcelas já pagas são preservadas. O imóvel fica DISPONÍVEL.`,
+  ].filter(l => l !== null).join('\n');
+  if (!confirm_(resumo)) return;
+
+  const btn = document.getElementById('resc-btn-confirmar');
+  btn.disabled = true; btn.textContent = '⏳ Encerrando...';
+  try {
+    const antes = { ...c };
+    const erros = [];
+
+    // 1) Cancela boletos Asaas das parcelas selecionadas
+    if (comBoleto.length && _asaasAtivo()) {
+      for (const p of comBoleto) {
+        try {
+          const r = await _asaasCall('DELETE', `/payment/${p.asaasPaymentId}`);
+          if (!(r && (r.ok || r.deleted))) erros.push(`${fmtDate(p.dataPagamento)}: ${r?.error || JSON.stringify(r?.errors || r)}`);
+        } catch (e) { erros.push(`${fmtDate(p.dataPagamento)}: ${e.message}`); }
+      }
+    }
+
+    // 2) Remove as parcelas pendentes selecionadas (pagas nunca entram na lista)
+    const removidas = parcelasSel.map(f => ({ id: f.id, vencimento: f.dataPagamento, valor: f.totalGeral || f.valorContrato || 0, asaasPaymentId: f.asaasPaymentId || null }));
+    const removidasIds = new Set(removidas.map(r => r.id));
+    DB.financeiro = DB.financeiro.filter(f => !removidasIds.has(f.id));
+    for (const rid of removidasIds) await deleteRecord('financeiro', rid);
+
+    // 3) Pro-rata do mês da saída (cobrança normal, opcional)
+    let proRataFinId = null;
+    if (proRataAplicar) {
+      const fPr = {
+        id: nextId(DB.financeiro), empresaId: c.empresaId || _currentEmpresaId(),
+        dataPagamento: dataSaida, contrato: c.codigo, inquilino: c.inquilino || '',
+        valorContrato: proRataValor, consumoAgua: 0, taxaManutencao: 0, taxasExtras: 0,
+        leituraAnterior: 0, leituraAtual: 0, valorKwh: 0, totalEnergia: 0,
+        pctMulta: 0, valorMulta: 0, diasAtraso: 0, pctMora: 0, valorMora: 0,
+        totalGeral: proRataValor, valorRecebido: 0, gerado: true,
+        observacoes: `PRO-RATA DA SAÍDA — ${proRataInfo.dias} dias ocupados de ${proRataInfo.diasMes} (${fmtDate(dataSaida)}). Base mensal ${fmt(proRataInfo.base || 0)}.`,
+      };
+      DB.financeiro.push(fPr);
+      await saveRecord('financeiro', fPr, { isNew: true });
+      proRataFinId = fPr.id;
+    }
+
+    // 4) Multa rescisória → registro no Financeiro (valor em taxasExtras p/ sobreviver à edição)
+    let multaFinId = null;
+    if (multaAplicar && multaSit !== 'ISENTA' && multaValor > 0) {
+      const paga = multaSit === 'PAGA' || multaSit === 'ABATIDA_CAUCAO';
+      const fM = {
+        id: nextId(DB.financeiro), empresaId: c.empresaId || _currentEmpresaId(),
+        tipo: 'multa_rescisoria',
+        dataPagamento: multaSit === 'A_COBRAR' ? multaVenc : (multaDataPg || dataSaida),
+        contrato: c.codigo, inquilino: c.inquilino || '',
+        valorContrato: 0, consumoAgua: 0, taxaManutencao: 0, taxasExtras: multaValor,
+        leituraAnterior: 0, leituraAtual: 0, valorKwh: 0, totalEnergia: 0,
+        pctMulta: 0, valorMulta: 0, diasAtraso: 0, pctMora: 0, valorMora: 0,
+        totalGeral: multaValor,
+        valorRecebido: paga ? multaValor : 0,
+        baixaManual: paga,
+        dataBaixa: paga ? (multaSit === 'PAGA' ? multaDataPg : dataSaida) : '',
+        formaPagamento: multaSit === 'PAGA' ? multaForma : (multaSit === 'ABATIDA_CAUCAO' ? 'Caução retida' : ''),
+        observacoes: `Multa rescisória (cláusula 19) — saída em ${fmtDate(dataSaida)} — ${motivo}`,
+        gerado: true,
+      };
+      DB.financeiro.push(fM);
+      await saveRecord('financeiro', fM, { isNew: true });
+      multaFinId = fM.id;
+    }
+
+    // 5) Atualiza o contrato
+    DB.contratos[idx] = {
+      ...c,
+      status: statusFinal,
+      dataEncerramento: dataSaida,
+      rescisao: {
+        dataSaida, motivo, motivoDetalhe,
+        antecipada: !!(c.dataTermino && dataSaida < c.dataTermino),
+        multa: {
+          aplicada: multaAplicar && multaSit !== 'ISENTA', valor: multaValor, situacao: multaSit,
+          calculo: _rescCalcMulta(c, dataSaida),
+          vencimento: multaSit === 'A_COBRAR' ? multaVenc : '',
+          dataPagamento: multaSit === 'PAGA' ? multaDataPg : (multaSit === 'ABATIDA_CAUCAO' ? dataSaida : ''),
+          formaPagamento: multaSit === 'PAGA' ? multaForma : '',
+          justificativa: multaSit === 'ISENTA' ? multaJust : '',
+          finId: multaFinId,
+        },
+        caucao: { destino: caucaoDestino, base: caucaoBase, devolvido: caucaoDevolvido, retido: caucaoRetido, obs: caucaoObs },
+        proRata: proRataAplicar ? { valor: proRataValor, dias: proRataInfo.dias, diasMes: proRataInfo.diasMes, finId: proRataFinId } : null,
+        parcelasRemovidas: removidas,
+        boletosCancelados: comBoleto.length - erros.length,
+        errosAsaas: erros,
+        observacoes: obs,
+        registradoEm: new Date().toISOString(),
+        usuario: _currentUser?.nome || 'Sistema',
+      },
+    };
+    await saveRecord('contratos', DB.contratos[idx]);
+    _auditLog('editar', 'contrato', id, c.codigo, antes, DB.contratos[idx]);
+    _persistImoveis([_syncImovelStatus(c.imovel)]);
+
+    closeModal('modal-rescisao');
+    renderContratos(); renderImoveis(); renderDashboard();
+    if (typeof renderFinanceiro === 'function') renderFinanceiro();
+
+    let msg = `Contrato ${c.codigo} encerrado (${statusFinal}).`;
+    if (removidas.length) msg += ` ${removidas.length} parcela(s) removida(s).`;
+    if (comBoleto.length) msg += ` ${comBoleto.length - erros.length}/${comBoleto.length} boleto(s) cancelado(s).`;
+    if (multaFinId) msg += ` Multa ${RESC_MULTA_LABEL[multaSit].toLowerCase()} lançada no Financeiro.`;
+    if (erros.length) { console.error('[rescisao] falhas Asaas:', erros); toast(msg + ` ${erros.length} falha(s) no Asaas — verifique o Financeiro.`, 'warning'); }
+    else toast(msg, 'success');
+
+    // 6) Boleto da multa (opcional, após persistir)
+    if (multaFinId && multaSit === 'A_COBRAR' && multaBoleto) setTimeout(() => gerarBoleto(multaFinId), 600);
+  } finally {
+    btn.disabled = false; btn.textContent = '✅ Confirmar encerramento';
+  }
+}
+
+// Selo compacto p/ listagem e ficha do inquilino
+function _rescSelo(c) {
+  const r = c && c.rescisao;
+  if (!r) return '';
+  const multaTxt = r.multa?.aplicada ? `Multa ${fmt(r.multa.valor)} (${RESC_MULTA_LABEL[r.multa.situacao] || r.multa.situacao})` : 'Sem multa';
+  const tip = `Encerrado em ${fmtDate(r.dataSaida)}${r.antecipada ? ' (antecipado)' : ''} — ${r.motivo}${r.motivoDetalhe ? ': ' + r.motivoDetalhe : ''} — ${multaTxt}`;
+  return `<span class="badge ${r.antecipada ? 'badge-orange' : 'badge-gray'}" style="font-size:10px;margin-top:4px;cursor:help" title="${_rescEsc(tip)}">🚪 ${r.antecipada ? 'Rescindido' : 'Saída'} ${fmtDate(r.dataSaida)}${r.multa?.aplicada ? ' · multa ' + (RESC_MULTA_LABEL[r.multa.situacao] || '').toLowerCase() : ''}</span>`;
+}
+
+// ── TERMO DE RESCISÃO (usa a prévia/impressão do contrato) ──
+function gerarTermoRescisao(id) {
+  const c = DB.contratos.find(x => x.id === id);
+  if (!c || !c.rescisao) { toast('Contrato sem registro de encerramento', 'error'); return; }
+  const r = c.rescisao;
+  const imo = DB.imoveis.find(i => i.nome === c.imovel) || {};
+  const normNome = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const inq = (c.inquilinoId ? DB.inquilinos.find(i => i.id === c.inquilinoId) : null)
+           || DB.inquilinos.find(i => normNome(i.nome) === normNome(c.inquilino)) || {};
+  const loc = DB.config.locador || {};
+  const endImo = typeof enderecoDoImovel === 'function' ? enderecoDoImovel(imo) : imo;
+  const endCompleto = [endImo.endereco, endImo.bairro, endImo.cidade && endImo.uf ? endImo.cidade + ' - ' + endImo.uf : endImo.cidade, endImo.cep ? 'CEP ' + endImo.cep : ''].filter(Boolean).join(', ') || c.imovel;
+  const mesesNome = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const dExt = iso => { if (!iso) return '—'; const d = new Date(iso + 'T12:00:00'); return `${d.getDate()} de ${mesesNome[d.getMonth()]} de ${d.getFullYear()}`; };
+  const cidade = (loc.endereco || 'Lauro de Freitas - BA').split(',').pop().trim();
+  const e = _rescEsc;
+
+  // Pendências que ficaram em aberto (não pagas e não removidas)
+  const pendentes = _myData(DB.financeiro).filter(f => f.contrato === c.codigo && f.tipo !== 'caucao' && !_rescFinPago(f) && (f.totalGeral || f.valorContrato || 0) > 0)
+    .sort((a, b) => (a.dataPagamento || '').localeCompare(b.dataPagamento || ''));
+  const totalPend = pendentes.reduce((s, f) => s + (f.totalGeral || f.valorContrato || 0), 0);
+
+  let multaTxt;
+  if (!r.multa?.aplicada) {
+    multaTxt = `As partes acordam que <strong>não será devida multa rescisória</strong>${r.multa?.justificativa ? `, em razão de: ${e(r.multa.justificativa)}` : ''}.`;
+  } else {
+    const calc = r.multa.calculo || {};
+    const base = calc.totais ? ` (1 aluguel de ${fmt(calc.aluguel)} × ${calc.restantes} dias restantes ÷ ${calc.totais} dias do prazo contratual)` : '';
+    const sit = {
+      PAGA:           `A multa foi <strong>quitada em ${fmtDate(r.multa.dataPagamento)}</strong>${r.multa.formaPagamento ? ` via ${e(r.multa.formaPagamento)}` : ''}, nada mais sendo devido a esse título.`,
+      ABATIDA_CAUCAO: `A multa foi <strong>compensada com a caução</strong> retida pelo LOCADOR, nada mais sendo devido a esse título.`,
+      A_COBRAR:       `A multa <strong>deverá ser paga até ${fmtDate(r.multa.vencimento)}</strong>, mediante cobrança emitida pelo LOCADOR.`,
+    }[r.multa.situacao] || '';
+    multaTxt = `Nos termos da Cláusula 19 do contrato, é devida multa rescisória no valor de <strong>${fmt(r.multa.valor)}</strong>${base}. ${sit}`;
+  }
+  const cau = r.caucao || {};
+  const caucaoTxt = {
+    NAO_SE_APLICA: 'Não houve caução/garantia vinculada ao contrato.',
+    DEVOLVIDA:     `A caução de <strong>${fmt(cau.base)}</strong> será <strong>devolvida integralmente</strong> ao LOCATÁRIO.`,
+    PARCIAL:       `Da caução de ${fmt(cau.base)}, o LOCADOR <strong>devolverá ${fmt(cau.devolvido)}</strong> e <strong>reterá ${fmt(cau.retido)}</strong>${cau.obs ? ` a título de: ${e(cau.obs)}` : ''}.`,
+    RETIDA:        `A caução de <strong>${fmt(cau.base)}</strong> será <strong>integralmente retida</strong> pelo LOCADOR${cau.obs ? ` a título de: ${e(cau.obs)}` : ''}.`,
+  }[cau.destino] || '';
+
+  const removidasTxt = (r.parcelasRemovidas || []).length
+    ? `Ficam canceladas as cobranças vincendas após a desocupação (${r.parcelasRemovidas.map(p => fmtDate(p.vencimento)).join(', ')}).`
+    : 'Não havia cobranças vincendas a cancelar.';
+  const proRataTxt = r.proRata ? ` Fica devida cobrança proporcional de <strong>${fmt(r.proRata.valor)}</strong> referente a ${r.proRata.dias} dia(s) de ocupação no mês da saída.` : '';
+  const pendTxt = pendentes.length
+    ? `Permanecem em aberto, de responsabilidade do LOCATÁRIO, as seguintes obrigações: ${pendentes.map(f => `${f.tipo === 'multa_rescisoria' ? 'multa rescisória' : 'parcela'} de ${fmt(f.totalGeral || f.valorContrato || 0)} com vencimento em ${fmtDate(f.dataPagamento)}`).join('; ')} — total de <strong>${fmt(totalPend)}</strong>. A quitação plena somente se dará após o pagamento integral desses valores.`
+    : `Não restam valores em aberto, pelo que as partes se dão <strong>plena, geral e irrevogável quitação</strong> das obrigações decorrentes do contrato de locação, nada mais tendo a reclamar uma da outra, a qualquer título.`;
+
+  const p = t => `<p style="margin:6px 0;text-align:justify">${t}</p>`;
+  const h = t => `<p style="margin:14px 0 6px;font-weight:700">${t}</p>`;
+  const html = `
+    <h3 style="text-align:center;margin:0 0 4px">TERMO DE RESCISÃO DE CONTRATO DE LOCAÇÃO</h3>
+    <p style="text-align:center;margin:0 0 16px">Contrato nº ${e(c.codigo)} — ${e(c.imovel)}</p>
+    ${p(`<strong>LOCADOR:</strong> ${e(loc.nome || '')}${loc.estadoCivil ? ', ' + e(loc.estadoCivil) : ''}${loc.profissao ? ', ' + e(loc.profissao) : ''}${loc.cpf ? ', CPF ' + e(loc.cpf) : ''}${loc.endereco ? ', residente em ' + e(loc.endereco) : ''}.`)}
+    ${p(`<strong>LOCATÁRIO:</strong> ${e(inq.nome || c.inquilino || '')}${inq.estadoCivil ? ', ' + e(inq.estadoCivil) : ''}${inq.profissao ? ', ' + e(inq.profissao) : ''}${inq.rg ? ', RG ' + e(inq.rg) : ''}${inq.cpf ? ', CPF ' + e(inq.cpf) : ''}.`)}
+    ${p(`As partes acima qualificadas resolvem, de comum acordo, <strong>rescindir</strong> o Contrato de Locação nº ${e(c.codigo)}, relativo ao imóvel situado em <strong>${e(endCompleto)}</strong>, celebrado com vigência de ${fmtDate(c.dataInicio)} a ${fmtDate(c.dataTermino)} e aluguel mensal de ${fmt(c.valorMensal)}, nos termos e condições a seguir.`)}
+    ${h('CLÁUSULA 1ª – DA RESCISÃO E DESOCUPAÇÃO')}
+    ${p(`O contrato fica rescindido${r.antecipada ? ' <strong>antecipadamente</strong>' : ''} a partir de <strong>${dExt(r.dataSaida)}</strong>, data da desocupação do imóvel e da entrega das chaves ao LOCADOR.`)}
+    ${p(`<strong>Motivo:</strong> ${e(r.motivo)}${r.motivoDetalhe ? ' — ' + e(r.motivoDetalhe) : ''}.`)}
+    ${h('CLÁUSULA 2ª – DA MULTA RESCISÓRIA')}
+    ${p(multaTxt)}
+    ${h('CLÁUSULA 3ª – DA CAUÇÃO / GARANTIA')}
+    ${p(caucaoTxt)}
+    ${h('CLÁUSULA 4ª – DAS COBRANÇAS E QUITAÇÃO')}
+    ${p(removidasTxt + proRataTxt)}
+    ${p(pendTxt)}
+    ${h('CLÁUSULA 5ª – DA VISTORIA DE SAÍDA')}
+    ${p(`O imóvel foi vistoriado na entrega das chaves${r.observacoes ? `, com as seguintes ressalvas: ${e(r.observacoes)}` : ', sendo devolvido nas condições em que foi recebido, ressalvado o desgaste natural pelo uso regular'}.`)}
+    ${h('CLÁUSULA 6ª – DAS DISPOSIÇÕES FINAIS')}
+    ${p(`Este termo é firmado em caráter irrevogável e irretratável, obrigando as partes e seus sucessores. Fica eleito o foro da comarca de ${e(cidade)} para dirimir quaisquer questões dele decorrentes.`)}
+    ${p(`E por estarem justas e acordadas, assinam o presente em 2 (duas) vias de igual teor.`)}
+    <p style="text-align:center;margin:24px 0 40px">${e(cidade)}, ${dExt(r.dataSaida)}.</p>
+    <p style="margin:36px 0 0;text-align:center">_______________________________________<br><strong>${e(loc.nome || 'LOCADOR')}</strong><br>LOCADOR</p>
+    <p style="margin:36px 0 0;text-align:center">_______________________________________<br><strong>${e(inq.nome || c.inquilino || 'LOCATÁRIO')}</strong><br>LOCATÁRIO</p>
+    <p style="margin:36px 0 0;text-align:center">_______________________________________<br>Testemunha 1 — Nome / CPF</p>
+    <p style="margin:36px 0 0;text-align:center">_______________________________________<br>Testemunha 2 — Nome / CPF</p>
+    <p class="no-print" style="margin-top:24px;font-size:11px;color:var(--gray-400)">Registrado no sistema em ${fmtDateHora ? fmtDateHora(r.registradoEm) : r.registradoEm} por ${e(r.usuario || '')}.</p>`;
+
+  document.getElementById('preview-ct-title').textContent = `Termo de Rescisão — ${c.codigo} — ${c.imovel}`;
+  document.getElementById('modal-ct-preview-body').innerHTML = html;
+  document.getElementById('modal-ct-preview').classList.add('open');
 }

@@ -146,16 +146,17 @@ Findo o prazo estipulado, e não havendo manifestação expressa de qualquer das
 
 CLÁUSULA 3 – DO VALOR DO ALUGUEL
 O valor mensal do aluguel será de {{CONTRATO_VALOR}} ({{CONTRATO_VALOR_EXTENSO}}).
+{{CONTRATO_DESCONTO_PROMO_BLOCO}}
 O pagamento deverá ser realizado até o dia {{CONTRATO_DIA_VENCIMENTO}} de cada mês, via boleto bancário enviado todos os meses para o WhatsApp de número {{LOCATARIO_TELEFONE}}, caso mude o número deverá ser informado de imediato.
 
 CLÁUSULA 4 – PAGAMENTO NA ENTRADA DO IMÓVEL
 No ato da assinatura do contrato e entrega das chaves, o LOCATÁRIO pagará:
 1º aluguel: {{CONTRATO_VALOR}}
-1 caução (garantia): {{CONTRATO_CAUCAO_INFO}}
+1 caução (garantia): <strong><u>{{CONTRATO_CAUCAO_INFO}}</u></strong>
 Total pago na entrada: {{CONTRATO_ENTRADA_TOTAL}} ({{CONTRATO_ENTRADA_TOTAL_EXTENSO}}). Pagamento realizado via boleto bancário.
 
 CLÁUSULA 5 – DA CAUÇÃO
-A caução em dinheiro será utilizada como garantia das obrigações contratuais.
+A caução em dinheiro, no valor pago de <strong><u>{{CONTRATO_CAUCAO}}</u></strong>, será utilizada como garantia das obrigações contratuais.
 O valor poderá ser utilizado para:
 pagamento de débitos
 reparo de danos no imóvel
