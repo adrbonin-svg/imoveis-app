@@ -8092,7 +8092,7 @@ async function testarEmail() {
 async function restaurarDoServidor() {
   if (!confirm_('Isso vai substituir os dados locais pelos dados do servidor. Continuar?')) return;
   try {
-    const res = await fetch('/api/db');
+    const res = await fetch('/api/db', { headers: _apiHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const serverData = await res.json();
     if (serverData.error) throw new Error(serverData.error);

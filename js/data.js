@@ -354,6 +354,11 @@ function _dbParaLocal(db) {
 // aba defasada sobrescreva dados criados por outra sessão.
 let _dbRev = 0;
 
+// Mitigação temporária das rotas /api/db e /api/record (ver server.js
+// requireApiToken) — não é segredo de verdade, pois vai no bundle público.
+const APP_API_TOKEN = '49fdfd0ba74b4623dd836244cf3d4d895b0861f52b5df3d67e126d4d03eab217';
+const _apiHeaders = (extra = {}) => ({ 'X-App-Token': APP_API_TOKEN, ...extra });
+
 // Persistência no localStorage (sem binários) + backup completo no servidor
 function saveData() {
   const json = JSON.stringify({ ...DB, _rev: _dbRev });
@@ -365,7 +370,7 @@ function saveData() {
   }
   fetch('/api/db', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: _apiHeaders({ 'Content-Type': 'application/json' }),
     body: json,
   })
     .then(r => (r.ok ? r.json() : null))
@@ -387,7 +392,7 @@ async function saveRecord(collection, record, opts = {}) {
   try {
     const r = await fetch('/api/record', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ collection, record: payload }),
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -411,7 +416,7 @@ async function saveRecord(collection, record, opts = {}) {
 async function deleteRecord(collection, id) {
   try { localStorage.setItem('imoveis_db', JSON.stringify(_dbParaLocal(DB))); } catch {}
   try {
-    const r = await fetch(`/api/record/${collection}/${id}`, { method: 'DELETE' });
+    const r = await fetch(`/api/record/${collection}/${id}`, { method: 'DELETE', headers: _apiHeaders() });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const resp = await r.json();
     if (resp && resp.ok && typeof resp._rev === 'number') { _dbRev = resp._rev; _persistRev(_dbRev); }
@@ -447,7 +452,7 @@ function _reRenderAtual() {
 //   sozinhas, SEM precisar limpar cache/cookies.
 // - Se a versão é a mesma, apenas completa os binários (fotos/docs) que faltam no cache.
 function _syncFromServer() {
-  fetch('/api/db').then(r => r.ok ? r.json() : null).then(srv => {
+  fetch('/api/db', { headers: _apiHeaders() }).then(r => r.ok ? r.json() : null).then(srv => {
     if (!srv || srv.error) return;
     const srvRev = (typeof srv._rev === 'number') ? srv._rev : null;
 
@@ -634,7 +639,7 @@ async function loadData() {
 
   // 2ª tentativa: servidor (MongoDB / db.json) — dados completos
   try {
-    const res = await fetch('/api/db');
+    const res = await fetch('/api/db', { headers: _apiHeaders() });
     if (res.ok) {
       const serverData = await res.json();
       if (serverData && !serverData.error) {

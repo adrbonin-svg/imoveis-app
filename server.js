@@ -30,7 +30,12 @@ async function getCol() {
 const app = express();
 app.disable('etag');
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static(path.join(__dirname), {
+
+// Servir só os diretórios/arquivos realmente públicos do frontend — nunca o
+// __dirname inteiro. Antes disso, db.json, server.js, backups, .py de uso
+// interno e node_modules eram baixáveis direto por URL (ex.: /db.json),
+// sem autenticação nenhuma (achado de auditoria, 18/10/2026).
+const _staticOpts = {
   etag: false,
   lastModified: false,
   setHeaders: (res) => {
@@ -38,7 +43,24 @@ app.use(express.static(path.join(__dirname), {
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
   }
-}));
+};
+app.use('/css', express.static(path.join(__dirname, 'css'), _staticOpts));
+app.use('/js',  express.static(path.join(__dirname, 'js'),  _staticOpts));
+app.use('/img', express.static(path.join(__dirname, 'img'), _staticOpts));
+app.get('/excluir-dados.html', (req, res) => res.sendFile(path.join(__dirname, 'excluir-dados.html')));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
+// Mitigação temporária de acesso às rotas de dados — NÃO é autenticação de
+// verdade (o token embutido no JS público pode ser lido por quem inspecionar
+// o bundle). Fecha o caso comprovado nesta auditoria: scanner/bot/URL direta
+// sem nenhum esforço lendo o banco inteiro. A correção definitiva é sessão
+// de servidor por login (pendente, item maior do roadmap de segurança).
+function requireApiToken(req, res, next) {
+  const token = process.env.APP_API_TOKEN;
+  if (!token) { console.warn('[security] APP_API_TOKEN não configurado — rota de dados sem proteção!'); return next(); }
+  if (req.headers['x-app-token'] === token) return next();
+  return res.status(401).json({ ok: false, error: 'não autorizado' });
+}
 
 // ── Config mutável (pode ser atualizada pelo painel) ────
 const cfg = {
@@ -273,7 +295,7 @@ function safeMerge(serverData, clientData) {
   return out;
 }
 
-app.get('/api/db', async (req, res) => {
+app.get('/api/db', requireApiToken, async (req, res) => {
   const col = await getCol();
   if (col) {
     const doc = await col.findOne({ _id: 'main' });
@@ -290,7 +312,7 @@ app.get('/api/db', async (req, res) => {
   }
 });
 
-app.post('/api/db', async (req, res) => {
+app.post('/api/db', requireApiToken, async (req, res) => {
   const body = { ...(req.body || {}) };
   const clientRev = body._rev;   // versão que o cliente acredita ter
   delete body._rev;
@@ -410,7 +432,7 @@ function applyUpsert(data, collection, record) {
   return rec;
 }
 
-app.post('/api/record', async (req, res) => {
+app.post('/api/record', requireApiToken, async (req, res) => {
   const { collection, record } = req.body || {};
   if (!LIST_KEYS.includes(collection)) return res.status(400).json({ ok: false, error: 'coleção inválida' });
   if (!record || typeof record !== 'object') return res.status(400).json({ ok: false, error: 'record ausente' });
@@ -449,7 +471,7 @@ app.post('/api/record', async (req, res) => {
   } catch (err) { return res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.delete('/api/record/:collection/:id', async (req, res) => {
+app.delete('/api/record/:collection/:id', requireApiToken, async (req, res) => {
   const { collection } = req.params;
   const id = /^\d+$/.test(req.params.id) ? parseInt(req.params.id) : req.params.id;
   if (!LIST_KEYS.includes(collection)) return res.status(400).json({ ok: false, error: 'coleção inválida' });
