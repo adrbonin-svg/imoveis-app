@@ -435,6 +435,38 @@ function _validarCNPJ(cnpj) {
   return calc(12) === +cnpj[12] && calc(13) === +cnpj[13];
 }
 
+// ── MÁSCARAS DE DIGITAÇÃO (aplicadas via oninput — não validam, só formatam) ──
+function _maskCPFTexto(v) {
+  v = v.replace(/\D/g, '').slice(0, 11);
+  if (v.length > 9) return v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4');
+  if (v.length > 6) return v.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
+  if (v.length > 3) return v.replace(/(\d{3})(\d{1,3})/, '$1.$2');
+  return v;
+}
+function _maskCNPJTexto(v) {
+  v = v.replace(/\D/g, '').slice(0, 14);
+  if (v.length > 12) return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{1,2})/, '$1.$2.$3/$4-$5');
+  if (v.length > 8)  return v.replace(/(\d{2})(\d{3})(\d{3})(\d{1,4})/, '$1.$2.$3/$4');
+  if (v.length > 5)  return v.replace(/(\d{2})(\d{3})(\d{1,3})/, '$1.$2.$3');
+  if (v.length > 2)  return v.replace(/(\d{2})(\d{1,3})/, '$1.$2');
+  return v;
+}
+// CPF ou CNPJ no mesmo campo — decide pelo tipo de pessoa selecionado no formulário
+// de inquilino (fisica/juridica); fora desse contexto (ex.: sem o hidden field),
+// cai sempre no CPF.
+function maskCpfCnpj(el) {
+  const tipo = document.getElementById('inq-tipo-pessoa')?.value;
+  el.value = tipo === 'juridica' ? _maskCNPJTexto(el.value) : _maskCPFTexto(el.value);
+}
+function maskTelefone(el) {
+  let v = el.value.replace(/\D/g, '').slice(0, 11);
+  if (v.length > 10) v = v.replace(/(\d{2})(\d{5})(\d{1,4})/, '($1) $2-$3');
+  else if (v.length > 6) v = v.replace(/(\d{2})(\d{4})(\d{1,4})/, '($1) $2-$3');
+  else if (v.length > 2) v = v.replace(/(\d{2})(\d{1,5})/, '($1) $2');
+  else if (v.length > 0) v = v.replace(/(\d{1,2})/, '($1');
+  el.value = v;
+}
+
 function _fieldError(id, msg) {
   const el = document.getElementById(id);
   if (el) { el.classList.add('field-error'); el.focus(); el.addEventListener('input', () => el.classList.remove('field-error'), { once: true }); }

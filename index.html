@@ -1816,7 +1816,7 @@
           </div>
           <div class="form-group">
             <label><span id="inq-label-cpf">CPF</span> *</label>
-            <input name="cpf" id="inq-campo-cpf" type="text" placeholder="000.000.000-00">
+            <input name="cpf" id="inq-campo-cpf" type="text" placeholder="000.000.000-00" oninput="maskCpfCnpj(this)" inputmode="numeric">
           </div>
 
           <!-- SOMENTE PESSOA FÍSICA -->
@@ -1844,7 +1844,7 @@
           </div>
           <div class="form-group inq-pj-field" style="display:none">
             <label>CPF do Representante</label>
-            <input name="cpfRepresentante" type="text">
+            <input name="cpfRepresentante" type="text" oninput="this.value=_maskCPFTexto(this.value)" inputmode="numeric">
           </div>
           <div class="form-group inq-pj-field" style="display:none">
             <label>Cargo / Função</label>
@@ -1853,11 +1853,11 @@
 
           <div class="form-group">
             <label>Celular *</label>
-            <input name="celular" id="inq-campo-celular" type="text" placeholder="(00) 00000-0000">
+            <input name="celular" id="inq-campo-celular" type="text" placeholder="(00) 00000-0000" oninput="maskTelefone(this)" inputmode="numeric">
           </div>
           <div class="form-group">
             <label>Telefone</label>
-            <input name="telefone" type="text" placeholder="(00) 0000-0000">
+            <input name="telefone" type="text" placeholder="(00) 0000-0000" oninput="maskTelefone(this)" inputmode="numeric">
           </div>
           <div class="form-group">
             <label>E-mail *</label>
@@ -2734,11 +2734,60 @@
       <h3 id="preview-ct-title">Contrato Gerado</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <small style="color:var(--gray-400);font-size:11px;flex-basis:100%;text-align:right">💡 Na janela de impressão → Mais configurações → desmarque <strong>"Cabeçalhos e rodapés"</strong></small>
-        <button class="btn btn-primary btn-sm" onclick="imprimirContrato()">🖨️ Imprimir / Salvar PDF</button>
+        <div id="ct-view-controls" style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="imprimirContrato()">🖨️ Imprimir / Salvar PDF</button>
+          <button class="btn btn-ghost btn-sm" id="ct-btn-editar" onclick="editarTextoContrato()">✏️ Editar texto</button>
+          <button class="btn btn-ghost btn-sm" id="ct-btn-restaurar-texto" style="display:none" onclick="restaurarTextoPadraoContrato()">↺ Restaurar modelo</button>
+        </div>
+        <div id="ct-editing-controls" style="display:none;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="salvarTextoContrato()">💾 Salvar edição</button>
+          <button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoTextoContrato()">✕ Cancelar edição</button>
+        </div>
         <button class="modal-close" onclick="closeModal('modal-ct-preview')">✕</button>
       </div>
     </div>
     <div class="modal-body" id="modal-ct-preview-body" style="padding:32px 40px;font-family:'Times New Roman',serif"></div>
+  </div>
+</div>
+
+<!-- ══ MODAL PREVIEW VISTORIA (documento separado, só a vistoria + fotos) ══ -->
+<div class="modal-overlay" id="modal-vistoria-preview">
+  <div class="modal modal-contrato-preview">
+    <div class="modal-head">
+      <h3 id="preview-vist-title">Vistoria</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <small style="color:var(--gray-400);font-size:11px;flex-basis:100%;text-align:right">💡 Na janela de impressão → Mais configurações → desmarque <strong>"Cabeçalhos e rodapés"</strong></small>
+        <button class="btn btn-primary btn-sm" onclick="imprimirVistoria()">🖨️ Imprimir / Salvar PDF</button>
+        <button class="btn btn-ghost btn-sm" style="color:#25D366" onclick="enviarVistoriaWhatsapp()">📱 Enviar por WhatsApp</button>
+        <button class="btn btn-ghost btn-sm" onclick="abrirAjudaVistoria()" title="Como funciona esse processo">❓ Como funciona</button>
+        <button class="modal-close" onclick="closeModal('modal-vistoria-preview')">✕</button>
+      </div>
+    </div>
+    <div class="modal-body" id="modal-vistoria-preview-body" style="padding:32px 40px;font-family:'Times New Roman',serif"></div>
+  </div>
+</div>
+
+<!-- ══ MODAL AJUDA — PROCESSO DE VISTORIA ══ -->
+<div class="modal-overlay" id="modal-ajuda-vistoria">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head">
+      <h3>❓ Como funciona a Vistoria</h3>
+      <button class="modal-close" onclick="closeModal('modal-ajuda-vistoria')">✕</button>
+    </div>
+    <div class="modal-body" style="padding:20px 24px;font-size:13.5px;line-height:1.6">
+      <p style="margin:0 0 14px;color:var(--gray-500)">A vistoria (checklist + fotos) é <strong>independente</strong> da assinatura do contrato — pode ser feita e assinada antes ou depois dele, sem problema.</p>
+      <ol style="margin:0 0 14px;padding-left:20px">
+        <li style="margin-bottom:10px"><strong>📷 Vistoria</strong> — na linha do contrato, preencha o checklist (itens + fotos) do imóvel.</li>
+        <li style="margin-bottom:10px"><strong>👤 Vincular ao Inquilino</strong> — dentro do mesmo checklist, selecione o inquilino. <span style="color:#dc2626">Sem este passo o inquilino não vê a vistoria no Portal dele</span> — a vistoria fica só no imóvel até ser vinculada a uma pessoa.</li>
+        <li style="margin-bottom:10px"><strong>📑 Gerar Vistoria</strong> — gera este documento (Termo de Vistoria), separado do texto do contrato, já com as fotos.</li>
+        <li style="margin-bottom:10px">Daqui você pode <strong>🖨️ Imprimir/Salvar PDF</strong> (entregar em mãos) ou <strong>📱 Enviar por WhatsApp</strong> (manda o acesso do Portal pro inquilino ver as fotos remotamente).</li>
+        <li style="margin-bottom:10px"><strong>✅ Inquilino assina</strong> — no Portal dele, aba Vistoria, botão "Confirmar e Assinar Vistoria". Fica registrado com data/hora, hash e IP — tem validade de assinatura eletrônica.</li>
+        <li>Depois de assinada, gerar o documento de novo já mostra a assinatura eletrônica no lugar das linhas em branco.</li>
+      </ol>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('modal-ajuda-vistoria')">Entendi</button>
+    </div>
   </div>
 </div>
 
