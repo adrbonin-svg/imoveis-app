@@ -1842,7 +1842,7 @@ async function saveInquilino() {
     _fieldError('inq-campo-cpf', `Já existe um inquilino com este ${tipoPessoa === 'juridica' ? 'CNPJ' : 'CPF'}: ${_dupInq.nome}`);
     return;
   }
-  if (!celLimpo && !id) {
+  if (!celLimpo) {
     _fieldError('inq-campo-celular', 'Celular é obrigatório');
     return;
   }
