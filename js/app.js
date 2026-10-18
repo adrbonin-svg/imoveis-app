@@ -3178,7 +3178,14 @@ function gerarParcelasContrato(c) {
     const dataVenc = `${ano}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
 
     const fator = (i === 0 && c.dataPrimeiraCobranca) ? fatorPrimeira : 1;
-    const valorContrato  = _round2((c.valorMensal    || 0) * fator);
+
+    // Desconto promocional nos N primeiros meses de aluguel (parcelas 0..N-1)
+    const emDescontoPromo = i < (parseInt(c.descontoPromoMeses) || 0);
+    const valorMensalEfetivo = emDescontoPromo
+      ? Math.max(0, (c.valorMensal || 0) - (parseFloat(c.descontoPromoValor) || 0))
+      : (c.valorMensal || 0);
+
+    const valorContrato  = _round2(valorMensalEfetivo * fator);
     const consumoAgua    = _round2((c.taxaAgua        || 0) * fator);
     const taxaManutencao = _round2((c.taxaManutencao  || 0) * fator);
     const taxasExtras    = _round2((c.taxasExtras      || 0) * fator);
@@ -3204,9 +3211,19 @@ function gerarParcelasContrato(c) {
       valorMora:       0,
       totalGeral:      _round2(valorContrato + consumoAgua + taxaManutencao + taxasExtras),
       valorRecebido:   0,
-      observacoes:     i === 0 && c.dataPrimeiraCobranca
-        ? _obsProRata(c, diasProRata, fatorPrimeira, valorContrato, consumoAgua, taxaManutencao, taxasExtras)
-        : '',
+      observacoes:     (() => {
+        // Só mostra "PRO-RATA" quando há mesmo fração de mês (fator < 1) —
+        // quando a 1ª cobrança cai num mês cheio, fatorPrimeira=1 e o texto
+        // antigo saía com "(0 dias)" sem sentido.
+        let obs = (i === 0 && c.dataPrimeiraCobranca && fatorPrimeira < 1)
+          ? _obsProRata(c, diasProRata, fatorPrimeira, valorContrato, consumoAgua, taxaManutencao, taxasExtras)
+          : '';
+        if (emDescontoPromo) {
+          const nota = `💰 Desconto promocional: aluguel de ${fmt(valorMensalEfetivo)} (parcela ${i + 1}/${c.descontoPromoMeses} com desconto de ${fmt(c.descontoPromoValor)} — valor cheio ${fmt(c.valorMensal)} retoma na parcela ${c.descontoPromoMeses + 1}).`;
+          obs = obs ? obs + '\n\n' + nota : nota;
+        }
+        return obs;
+      })(),
       gerado:          true,
     });
   }
@@ -4319,6 +4336,7 @@ function openFinanceiro(id = null) {
 async function saveFinanceiro() {
   const form = document.getElementById('form-financeiro');
   const id   = form.dataset.id ? parseInt(form.dataset.id) : null;
+  const existingRec = id ? DB.financeiro.find(x => x.id === id) : null;
   const num  = n => parseFloat(form[n]?.value) || 0;
 
   const kwh               = Math.max(0, num('leituraAtual') - num('leituraAnterior'));
@@ -4328,7 +4346,15 @@ async function saveFinanceiro() {
   const valorMulta   = num('valorContrato') * (num('pctMulta') / 100);
   const valorMora    = num('valorContrato') * (num('pctMora') / 100) * num('diasAtraso');
   const descontoValor = num('descontoValor');
-  const totalGeral   = num('valorContrato') + num('consumoAgua') + num('taxaManutencao') + num('taxasExtras') + totalEnergia + valorMulta + valorMora - descontoValor;
+  let totalGeral   = num('valorContrato') + num('consumoAgua') + num('taxaManutencao') + num('taxasExtras') + totalEnergia + valorMulta + valorMora - descontoValor;
+
+  // Caução e multa rescisória têm valor fixo fora dos campos padrão do formulário
+  // (valorContrato fica 0 nesses registros — ver gerarCaucaoContrato). Sem este
+  // guard, editar só a data (ou qualquer campo) recalcula pela fórmula de aluguel
+  // e ZERA o valor exibido na lista — reproduzido 18/10 com a caução da Eliane.
+  if (existingRec && (existingRec.tipo === 'caucao' || existingRec.tipo === 'multa_rescisoria')) {
+    totalGeral = existingRec.totalGeral;
+  }
 
   const data = {
     dataPagamento:  form.dataPagamento.value,
