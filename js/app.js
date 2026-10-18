@@ -1798,6 +1798,18 @@ async function saveInquilino() {
   } else {
     if (!_validarCPF(cpfLimpo)) { _fieldError('inq-campo-cpf', 'CPF inválido — verifique os dígitos'); return; }
   }
+  // Bloqueia CPF/CNPJ duplicado na MESMA empresa — dois inquilinos com o mesmo
+  // documento colidiam silenciosamente no login do portal (usuario = CPF).
+  const _empAlvoInq = id ? (DB.inquilinos.find(x => x.id === id)?.empresaId ?? null) : (_currentEmpresaId() ?? null);
+  const _dupInq = DB.inquilinos.find(i =>
+    i.id !== id &&
+    (i.empresaId ?? null) === _empAlvoInq &&
+    (i.cpf || '').replace(/\D/g, '') === cpfLimpo
+  );
+  if (_dupInq) {
+    _fieldError('inq-campo-cpf', `Já existe um inquilino com este ${tipoPessoa === 'juridica' ? 'CNPJ' : 'CPF'}: ${_dupInq.nome}`);
+    return;
+  }
   if (!celLimpo && !id) {
     _fieldError('inq-campo-celular', 'Celular é obrigatório');
     return;
@@ -2710,6 +2722,7 @@ function renderContratos() {
             <div class="actions">
               <button class="btn btn-ghost btn-sm" onclick="gerarContrato(${c.id})">📄 Gerar</button>
               <button class="btn btn-ghost btn-sm" onclick="abrirVistoriaContrato(${c.id})" title="Abrir o checklist de vistoria (fotos) do imóvel deste contrato">📷 Vistoria</button>
+              ${_nFotos > 0 ? `<button class="btn btn-ghost btn-sm" onclick="gerarVistoriaContrato(${c.id})" title="Gerar o termo de vistoria com as fotos, separado do contrato — imprimir/PDF ou enviar por WhatsApp">📑 Gerar Vistoria</button>` : ''}
               <button class="btn btn-ghost btn-sm" onclick="enviarContratoParaAssinar(${c.id})" title="Enviar por e-mail o convite para o inquilino assinar (contrato + vistoria)">📤 Enviar p/ assinar</button>
               <button class="btn btn-ghost btn-sm" style="color:#25D366" onclick="enviarContratoWhatsapp(${c.id})" title="Enviar contrato via WhatsApp">📱 WhatsApp</button>
               ${_podeAcao('contratos','editar') ? `<button class="btn btn-ghost btn-sm" onclick="openContrato(${c.id})">Editar</button>` : ''}
@@ -3453,39 +3466,60 @@ function gerarContrato(id) {
 
   const caucao         = parseFloat(c.caucao)   || 0;
   const caucaoParcelas = parseInt(c.caucaoParcelas) || 1;
-  const caucaoParcelaValor = caucaoParcelas > 1 ? caucao / caucaoParcelas : caucao;
-  // Parcelas com valor/data definidos (ou fallback igual + mensal)
-  const _caucaoItens = (Array.isArray(c.caucaoParcelasItens) && c.caucaoParcelasItens.length === caucaoParcelas)
-    ? c.caucaoParcelasItens : null;
-  let caucaoInfo, caucaoListaLinhas = '';
-  if (caucaoParcelas > 1) {
-    const itens = _caucaoItens || Array.from({ length: caucaoParcelas }, (_, i) => ({
-      valor: caucaoParcelaValor, data: _caucaoDataMensal(c.dataInicio || c.dataContrato || today(), i),
-    }));
-    const partes = itens.map((p, i) => `${i + 1}ª de ${fmt(parseFloat(p.valor) || 0)} em ${fmtDate(p.data)}`);
-    caucaoInfo = `${fmt(caucao)} parcelada em ${caucaoParcelas}x (${partes.join('; ')})`;
-    caucaoListaLinhas = itens.map((p, i) => `Parcela ${i + 1}/${caucaoParcelas}: ${fmt(parseFloat(p.valor) || 0)} — vencimento ${fmtDate(p.data)}`).join('\n');
-  } else {
-    caucaoInfo = fmt(caucao);
-  }
   const taxaAgua  = parseFloat(c.taxaAgua) || 0;
   const entrada   = (c.valorMensal || 0) + caucao;
 
-  // Desconto promocional nos N primeiros meses (ex.: 6 meses com R$100 de abatimento)
+  // Data do contrato por extenso: "10 de maio de 2026"
+  const mesesNome = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+
+  // Desconto promocional nos N primeiros meses (ex.: 6 meses com R$100 de abatimento) —
+  // só entra na cláusula quando o contrato tem os campos de desconto preenchidos.
   const _NUM_EXT = {1:'um',2:'dois',3:'três',4:'quatro',5:'cinco',6:'seis',7:'sete',8:'oito',9:'nove',10:'dez',11:'onze',12:'doze'};
   const numExt = n => _NUM_EXT[n] || String(n);
   const descontoPromoValor = parseFloat(c.descontoPromoValor) || 0;
   const descontoPromoMeses = parseInt(c.descontoPromoMeses) || 0;
   const temDescontoPromo   = descontoPromoValor > 0 && descontoPromoMeses > 0;
   const valorComDesconto   = Math.max(0, (c.valorMensal || 0) - descontoPromoValor);
+  const _capitaliza = s => s.charAt(0).toUpperCase() + s.slice(1);
+  const _mesAnoLabel = iso => { const d = new Date(iso + 'T12:00:00'); return _capitaliza(`${mesesNome[d.getMonth()]}/${d.getFullYear()}`); };
+  const _dataBaseDesconto   = c.dataInicio || c.dataContrato || today();
+  const mesInicioDescLabel  = temDescontoPromo ? _mesAnoLabel(_dataBaseDesconto) : '';
+  const mesFimDescLabel     = temDescontoPromo ? _mesAnoLabel(_caucaoDataMensal(_dataBaseDesconto, descontoPromoMeses - 1)) : '';
+  const mesRetornoLabel     = temDescontoPromo ? _mesAnoLabel(_caucaoDataMensal(_dataBaseDesconto, descontoPromoMeses)) : '';
+  const periodoDescLabel    = descontoPromoMeses === 1 ? mesInicioDescLabel : `${mesInicioDescLabel} a ${mesFimDescLabel}`;
   const descontoPromoBloco = temDescontoPromo
-    ? `<strong><u>Fica concedido desconto promocional de ${fmt(descontoPromoValor)} (${valorPorExtenso(descontoPromoValor)}) nos ${descontoPromoMeses} (${numExt(descontoPromoMeses)}) primeiros meses de contrato, período em que o valor mensal do aluguel será de ${fmt(valorComDesconto)} (${valorPorExtenso(valorComDesconto)}). A partir do ${descontoPromoMeses + 1}º mês, o valor do aluguel retorna integralmente a ${fmt(c.valorMensal)} (${valorPorExtenso(c.valorMensal)}).</u></strong>\n`
-      + `1º ao ${descontoPromoMeses}º mês: <strong><u>${fmt(valorComDesconto)}/mês</u></strong>\n`
-      + `A partir do ${descontoPromoMeses + 1}º mês: <strong><u>${fmt(c.valorMensal)}/mês</u></strong>`
+    ? `<strong><u>Fica concedido desconto promocional de ${fmt(descontoPromoValor)} (${valorPorExtenso(descontoPromoValor)}) nos ${descontoPromoMeses} (${numExt(descontoPromoMeses)}) primeiros meses de contrato — de ${periodoDescLabel} —, período em que o valor mensal do aluguel será de ${fmt(valorComDesconto)} (${valorPorExtenso(valorComDesconto)}). A partir de ${mesRetornoLabel} (${descontoPromoMeses + 1}º mês), o valor do aluguel retorna integralmente a ${fmt(c.valorMensal)} (${valorPorExtenso(c.valorMensal)}).</u></strong>\n`
+      + `${periodoDescLabel}: <strong><u>${fmt(valorComDesconto)}/mês</u></strong>\n`
+      + `A partir de ${mesRetornoLabel}: <strong><u>${fmt(c.valorMensal)}/mês</u></strong>`
     : '';
 
-  // Data do contrato por extenso: "10 de maio de 2026"
-  const mesesNome = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  // Valor da caução em negrito + nota explicativa quando o total é um múltiplo exato
+  // do aluguel mensal (considerando o valor COM desconto, se houver) — é como a
+  // caução é sempre definida neste negócio (N meses de aluguel).
+  const numExtFem = n => (n === 1 ? 'uma' : n === 2 ? 'duas' : numExt(n));
+  const caucaoParcelaValor = caucaoParcelas > 1 ? caucao / caucaoParcelas : caucao;
+  const _caucaoItens = (Array.isArray(c.caucaoParcelasItens) && c.caucaoParcelasItens.length === caucaoParcelas)
+    ? c.caucaoParcelasItens : null;
+  const _valorBaseCaucao      = temDescontoPromo ? valorComDesconto : (c.valorMensal || 0);
+  const _nMesesCaucao         = _valorBaseCaucao > 0 ? caucao / _valorBaseCaucao : 0;
+  const _caucaoEhMultiploExato = caucao > 0 && _valorBaseCaucao > 0
+    && Math.abs(_nMesesCaucao - Math.round(_nMesesCaucao)) < 0.01 && Math.round(_nMesesCaucao) >= 1;
+  const _caucaoNMeses = Math.round(_nMesesCaucao);
+  const caucaoDetalhe = _caucaoEhMultiploExato
+    ? ` (equivalente a ${_caucaoNMeses} (${numExtFem(_caucaoNMeses)}) mensalidade${_caucaoNMeses > 1 ? 's' : ''} de aluguel${temDescontoPromo ? ' no valor promocional' : ''} de ${fmt(_valorBaseCaucao)}${_caucaoNMeses > 1 ? ' cada' : ''}${temDescontoPromo ? `, vigente nos ${descontoPromoMeses} primeiros meses deste contrato` : ''})`
+    : '';
+  let caucaoInfo, caucaoListaLinhas = '';
+  if (caucaoParcelas > 1) {
+    const itens = _caucaoItens || Array.from({ length: caucaoParcelas }, (_, i) => ({
+      valor: caucaoParcelaValor, data: _caucaoDataMensal(c.dataInicio || c.dataContrato || today(), i),
+    }));
+    const partes = itens.map((p, i) => `${i + 1}ª de ${fmt(parseFloat(p.valor) || 0)} em ${fmtDate(p.data)}`);
+    caucaoInfo = `<strong><u>${fmt(caucao)}${caucaoDetalhe} parcelada em ${caucaoParcelas}x</u></strong> (${partes.join('; ')})`;
+    caucaoListaLinhas = itens.map((p, i) => `Parcela ${i + 1}/${caucaoParcelas}: ${fmt(parseFloat(p.valor) || 0)} — vencimento ${fmtDate(p.data)}`).join('\n');
+  } else {
+    caucaoInfo = `<strong><u>${fmt(caucao)}${caucaoDetalhe}</u></strong>`;
+  }
+
   let dataContratoExtenso = '';
   if (c.dataContrato) {
     const dc = new Date(c.dataContrato+'T12:00:00');
@@ -3636,19 +3670,76 @@ function gerarContrato(id) {
   const _ckVist = _vistoriaDoContrato(c);
   const anexoVistoria = _anexoVistoriaHtml(_ckVist);
 
+  // Texto deste contrato pode ter sido editado manualmente (salvarTextoContrato) —
+  // nesse caso usa o texto salvo no lugar do gerado agora a partir do Modelo padrão.
+  const textoBase = c.textoCustomHtml || html;
+
   // Ordem correta: quando há anexo de fotos, o bloco de ASSINATURAS vai para
   // DEPOIS das fotos — o inquilino assina por último, cobrindo contrato + vistoria.
-  let corpoHtml = html, assinaturaHtml = '';
+  let corpoHtml = textoBase, assinaturaHtml = '';
   if (anexoVistoria) {
-    const idxAss = html.search(/<p[^>]*>\s*ASSINATURAS/i);
-    if (idxAss >= 0) { corpoHtml = html.slice(0, idxAss); assinaturaHtml = html.slice(idxAss); }
+    const idxAss = textoBase.search(/<p[^>]*>\s*ASSINATURAS/i);
+    if (idxAss >= 0) { corpoHtml = textoBase.slice(0, idxAss); assinaturaHtml = textoBase.slice(idxAss); }
   }
 
   // Painel de diagnóstico é só para o admin — o inquilino vê apenas o contrato
   const _ehInquilino = (typeof _currentUser !== 'undefined' && _currentUser && _currentUser.perfil === 'inquilino');
-  document.getElementById('preview-ct-title').textContent = `Contrato ${c.codigo} — ${c.imovel}`;
-  document.getElementById('modal-ct-preview-body').innerHTML = (_ehInquilino ? '' : inqInfoBar) + corpoHtml + anexoVistoria + assinaturaHtml;
+  _ctPreviewId = id;
+  const temTextoCustom = !!c.textoCustomHtml;
+  const badgeEditado = (temTextoCustom && !_ehInquilino)
+    ? ` <span class="badge badge-yellow" style="font-size:10px;vertical-align:2px" title="Editado manualmente${c.textoCustomEm ? ' em ' + fmtDateHora(c.textoCustomEm) : ''}">✏️ texto editado</span>`
+    : '';
+  document.getElementById('preview-ct-title').innerHTML = `Contrato ${c.codigo} — ${c.imovel}${badgeEditado}`;
+  document.getElementById('ct-btn-editar').style.display = _ehInquilino ? 'none' : '';
+  document.getElementById('ct-btn-restaurar-texto').style.display = (temTextoCustom && !_ehInquilino) ? '' : 'none';
+  document.getElementById('ct-view-controls').style.display = 'flex';
+  document.getElementById('ct-editing-controls').style.display = 'none';
+  document.getElementById('modal-ct-preview-body').innerHTML =
+    (_ehInquilino ? '' : inqInfoBar) + `<div id="ct-preview-text">${corpoHtml + anexoVistoria + assinaturaHtml}</div>`;
   document.getElementById('modal-ct-preview').classList.add('open');
+}
+
+// Contrato atualmente aberto na prévia — usado por editar/salvar/cancelar/restaurar texto
+let _ctPreviewId = null;
+
+// Entra em modo de edição: o corpo do contrato (sem o painel de diagnóstico) vira editável
+function editarTextoContrato() {
+  const el = document.getElementById('ct-preview-text');
+  if (!el) return;
+  el.contentEditable = 'true';
+  el.classList.add('ct-editing');
+  el.focus();
+  document.getElementById('ct-view-controls').style.display = 'none';
+  document.getElementById('ct-editing-controls').style.display = 'flex';
+}
+
+// Descarta as edições em tela e redesenha a partir do que está salvo
+function cancelarEdicaoTextoContrato() {
+  if (_ctPreviewId != null) gerarContrato(_ctPreviewId);
+}
+
+// Salva o texto editado como override individual deste contrato (não afeta o Modelo padrão nem outros contratos)
+async function salvarTextoContrato() {
+  const el = document.getElementById('ct-preview-text');
+  const c  = DB.contratos.find(x => x.id === _ctPreviewId);
+  if (!el || !c) return;
+  c.textoCustomHtml = el.innerHTML;
+  c.textoCustomEm   = new Date().toISOString();
+  await saveRecord('contratos', c);
+  toast('Texto deste contrato salvo — a próxima geração/impressão usa este texto, não mais o Modelo padrão.', 'success');
+  gerarContrato(_ctPreviewId);
+}
+
+// Descarta o override individual e volta a gerar o texto a partir do Modelo de Contrato padrão
+async function restaurarTextoPadraoContrato() {
+  const c = DB.contratos.find(x => x.id === _ctPreviewId);
+  if (!c) return;
+  if (!confirm_('Isso descarta o texto editado manualmente deste contrato e volta a gerar a partir do Modelo de Contrato padrão. Continuar?')) return;
+  delete c.textoCustomHtml;
+  delete c.textoCustomEm;
+  await saveRecord('contratos', c);
+  toast('Texto restaurado para o Modelo padrão', 'success');
+  gerarContrato(_ctPreviewId);
 }
 
 // Margens e dimensões da impressão (A4). Aplicadas em TODAS as páginas.
@@ -3695,7 +3786,10 @@ function _paginarContrato(html) {
 }
 
 function imprimirContrato() {
-  const body = document.getElementById('modal-ct-preview-body').innerHTML;
+  // A paginação precisa dos <p> das cláusulas como irmãos de topo — não do wrapper
+  // #ct-preview-text (criado pra edição de texto) nem do painel de diagnóstico.
+  const body = document.getElementById('ct-preview-text')?.innerHTML
+    ?? document.getElementById('modal-ct-preview-body').innerHTML;
   const pages = _paginarContrato(body);
   const total = pages.length;
   const sheets = pages.map((p, i) => `
@@ -3735,6 +3829,113 @@ function imprimirContratoDireto(id) {
   gerarContrato(id);                 // preenche o corpo da prévia
   imprimirContrato();                // abre a janela de impressão
   closeModal('modal-ct-preview');    // não precisa deixar a prévia aberta
+}
+
+// Contrato cuja vistoria está aberta na prévia — usado pelo botão de WhatsApp
+let _vistPreviewId = null;
+
+// Gera um documento SEPARADO só com a vistoria (fotos + termo) — não mistura
+// com o texto do contrato, pra poder imprimir/enviar isoladamente.
+function gerarVistoriaContrato(id) {
+  const c = DB.contratos.find(x => x.id === id);
+  if (!c) return;
+  const ck = _vistoriaDoContrato(c);
+  const itensComFoto = ck ? (ck.items || []).filter(it => it.fotoData) : [];
+  if (!itensComFoto.length) { toast('Nenhuma foto de vistoria vinculada a este contrato', 'error'); return; }
+
+  const normNome = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const inq = (c.inquilinoId ? DB.inquilinos.find(i => i.id === c.inquilinoId) : null)
+           || DB.inquilinos.find(i => normNome(i.nome) === normNome(c.inquilino)) || {};
+  const loc = DB.config.locador || {};
+  const imo = DB.imoveis.find(i => normNome(i.nome) === normNome(c.imovel)) || {};
+  const endImo = enderecoDoImovel(imo);
+  const endParts = [endImo.endereco, endImo.bairro, endImo.cidade && endImo.uf ? endImo.cidade + ' - ' + endImo.uf : endImo.cidade, endImo.cep ? 'CEP ' + endImo.cep : ''].filter(Boolean);
+  const endCompleto = endParts.join(', ') || c.imovel;
+
+  const cabecalho = `
+    <p style="font-weight:700;text-align:center;margin:0 0 4px">TERMO DE VISTORIA — ${_esc((ck.tipo || 'Vistoria').toUpperCase())}</p>
+    <p style="margin:4px 0">Imóvel: ${_esc(c.imovel)} — ${_esc(endCompleto)}</p>
+    <p style="margin:4px 0">Contrato: ${_esc(c.codigo)} · Data da vistoria: ${fmtDate(ck.vinculadoEm)}</p>
+    <p style="margin:4px 0">LOCADOR: ${_esc(loc.nome || '')}</p>
+    <p style="margin:4px 0">LOCATÁRIO: ${_esc(inq.nome || c.inquilino || '')}${inq.cpf ? ' — CPF ' + _esc(inq.cpf) : ''}</p>
+    <p style="margin:12px 0">Pelo presente termo, as partes acima identificadas declaram ter vistoriado em conjunto o imóvel objeto do contrato de locação citado, registrando abaixo, com descrição e fotografia, o estado de conservação de cada item na data desta vistoria. Este termo passa a fazer parte integrante do contrato de locação ${_esc(c.codigo)}.</p>`;
+
+  const cards = itensComFoto.map(it => `
+    <div style="page-break-inside:avoid;margin:10px 0;border:1px solid #bbb;border-radius:6px;padding:8px">
+      <div style="font-weight:700;margin-bottom:6px">${_esc(it.item)}</div>
+      <img src="${it.fotoData}" style="max-width:100%;max-height:90mm;object-fit:contain;display:block;margin:0 auto">
+      ${it.obs ? `<div style="font-size:11px;color:#333;margin-top:6px">${_esc(it.obs)}</div>` : ''}
+    </div>`).join('');
+
+  const assinaturaHtml = ck.confirmadoEm
+    ? `<p style="font-weight:700;margin:16px 0 4px">ASSINATURA ELETRÔNICA</p>
+       <p style="margin:4px 0">Confirmado por ${_esc(ck.confirmadoPor || inq.nome || '')} em ${fmtDateHora(ck.confirmadoEm)}${ck.assinaturaHash ? ' · hash ' + String(ck.assinaturaHash).slice(0, 16) + '…' : ''}.</p>`
+    : `<p style="font-weight:700;margin:16px 0 4px">ASSINATURAS</p>
+       <p style="margin:4px 0">LOCADOR ______________________________________</p>
+       <p style="margin:4px 0">${_esc(loc.nome || '')}</p>
+       <p style="margin:4px 0">LOCATÁRIO _____________________________________</p>
+       <p style="margin:4px 0">${_esc(inq.nome || c.inquilino || '')}</p>`;
+
+  _vistPreviewId = id;
+  document.getElementById('preview-vist-title').textContent = `Vistoria — ${c.codigo} — ${c.imovel}`;
+  document.getElementById('modal-vistoria-preview-body').innerHTML = cabecalho + cards + assinaturaHtml;
+  document.getElementById('modal-vistoria-preview').classList.add('open');
+}
+
+function imprimirVistoria() {
+  const body = document.getElementById('modal-vistoria-preview-body').innerHTML;
+  const pages = _paginarContrato(body);
+  const total = pages.length;
+  const sheets = pages.map((p, i) => `
+    <div class="sheet">
+      <div class="content">${p}</div>
+      <div class="pg-footer">Página ${i + 1} de ${total}</div>
+    </div>`).join('');
+
+  const w = window.open('', '_blank');
+  w.document.title = ' ';
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title> </title>
+    <style>
+      @page { size: A4; margin: 0; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body { font-family: ${_PRINT_CFG.fonte}; font-size: ${_PRINT_CFG.fontePt}pt; color: #000;
+             -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .sheet { width: 210mm; height: 297mm; padding: ${_PRINT_CFG.margemCm}cm; position: relative;
+               page-break-after: always; overflow: hidden; }
+      .sheet:last-child { page-break-after: auto; }
+      .content { line-height: ${_PRINT_CFG.linha}; text-align: justify; }
+      .content p { margin: 5px 0; orphans: 2; widows: 2; }
+      strong { font-weight: 700; }
+      .pg-footer { position: absolute; bottom: 1.1cm; left: ${_PRINT_CFG.margemCm}cm; right: ${_PRINT_CFG.margemCm}cm;
+                   text-align: center; font-size: 9pt; color: #444; border-top: 1px solid #ccc; padding-top: 4px; }
+      .no-print { display: none !important; }
+    </style>
+    </head><body>${sheets}<script>window.onload=()=>{window.print();window.close();}<\/script></body></html>`);
+  w.document.close();
+}
+
+// Envia ao inquilino, por WhatsApp (click-to-chat), o convite para ver as fotos
+// da vistoria e assinar no Portal — a assinatura (termos + fotos) acontece lá.
+function enviarVistoriaWhatsapp() {
+  const c = DB.contratos.find(x => x.id === _vistPreviewId);
+  if (!c) return;
+  const normNome = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const inq = (c.inquilinoId ? DB.inquilinos.find(i => i.id === c.inquilinoId) : null)
+           || DB.inquilinos.find(i => normNome(i.nome) === normNome(c.inquilino));
+  const fone = (inq?.celular || inq?.telefone || '').replace(/\D/g, '');
+  if (!fone) { toast('Celular do inquilino não cadastrado', 'error'); return; }
+  const ck = _vistoriaDoContrato(c);
+  const msg = encodeURIComponent(
+    `Olá ${c.inquilino || 'inquilino'}, a vistoria${ck?.tipo ? ' de ' + ck.tipo.toLowerCase() : ''} do imóvel ${c.imovel} (contrato ${c.codigo}) está disponível com as fotos.\n\n` +
+    `Acesse o Portal do Inquilino, aba Vistoria, para ver as fotos e confirmar/assinar.` +
+    _textoAcessoInquilino(inq?.id)
+  );
+  window.open(`https://wa.me/55${fone}?text=${msg}`, '_blank');
+}
+
+function abrirAjudaVistoria() {
+  document.getElementById('modal-ajuda-vistoria').classList.add('open');
 }
 
 const CT_CAMPOS = {
